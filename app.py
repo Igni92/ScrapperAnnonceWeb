@@ -13,6 +13,7 @@ import config
 import db
 import jobs
 import main as pipeline
+import communes
 import photo_analysis
 import scoring
 import trajets
@@ -175,7 +176,7 @@ def parser_formulaire(form) -> tuple[dict, list[str]]:
                 valeurs[nom] = float(brut)
             elif type_ == "str":
                 valeurs[nom] = brut.strip()
-            elif type_ == "liste":
+            elif type_ in ("liste", "villes"):
                 valeurs[nom] = [v.strip() for v in brut.split(",") if v.strip()]
             elif type_ == "sources":
                 valeurs[nom] = [s for s in form.getlist(nom) if s in SCRAPERS]
@@ -217,6 +218,10 @@ def parser_formulaire(form) -> tuple[dict, list[str]]:
             erreurs.append("Heure de départ : format attendu HH:MM (ex. 08:30).")
         if not valeurs["SOURCES_ACTIVES"]:
             erreurs.append("Cochez au moins un site.")
+        deps = [d.zfill(2) for d in valeurs["CARTE_DEPARTEMENTS"]]
+        if any(not (d.isdigit() or d in ("2A", "2B")) or len(d) > 3 for d in deps):
+            erreurs.append("Départements de la carte : codes attendus (75, 92, 93, 94…).")
+        valeurs["CARTE_DEPARTEMENTS"] = deps
     return valeurs, erreurs
 
 
@@ -279,12 +284,72 @@ def _valeurs_formulaire(valeurs: dict) -> dict:
     resultat = {}
     for nom, type_, *_ in config.PARAMETRES:
         v = valeurs.get(nom, config.exporter().get(nom))
-        if type_ == "liste":
+        if type_ in ("liste", "villes"):
             v = ", ".join(v)
         elif type_ == "dict_int":
             v = "\n".join(f"{k}: {val}" for k, val in v.items())
         resultat[nom] = v
     return resultat
+
+
+# ---------------------------------------------------------------------------
+# Carte des communes et suggestions
+# ---------------------------------------------------------------------------
+@app.get("/api/communes")
+def api_communes():
+    """GeoJSON des communes des départements de la carte, avec leur statut de trajet."""
+    deps = [d for d in request.args.get("deps", ",".join(config.CARTE_DEPARTEMENTS)).split(",") if d.strip()]
+    conn = get_conn()
+    etats = communes.statuts(conn, deps)
+    features = []
+    for c in communes.charger_departements(deps):
+        etat = etats.get(c["code"]) or {}
+        features.append({
+            "type": "Feature",
+            "geometry": c["geometry"],
+            "properties": {
+                "code": c["code"], "nom": c["nom"], "dep": c["dep"],
+                "trajet_minutes": etat.get("trajet_minutes"),
+                "ok": etat.get("ok"),
+                "trajets": etat.get("trajets") or {},
+            },
+        })
+    return jsonify({"type": "FeatureCollection", "features": features})
+
+
+@app.get("/api/destinations")
+def api_destinations():
+    """Coordonnées des destinations configurées (pour les marqueurs de la carte)."""
+    conn = get_conn()
+    points = []
+    for d in config.DESTINATIONS:
+        coord = trajets.geocoder(conn, d["adresse"])
+        if coord:
+            points.append({"nom": d["nom"], "lat": coord["lat"], "lon": coord["lon"],
+                           "mode": d["mode"], "max_minutes": d.get("max_minutes")})
+    return jsonify(points)
+
+
+@app.get("/api/suggestions")
+def api_suggestions():
+    conn = get_conn()
+    return jsonify([{"nom": c["nom"], "code": c["code"], "trajet_minutes": c["trajet_minutes"],
+                     "trajets": c["trajets"]} for c in communes.villes_suggerees(conn)])
+
+
+@app.post("/parametres/ajouter-villes")
+def ajouter_villes():
+    """Ajoute des villes (suggestions cochées, ou toutes les suggestions) à VILLES."""
+    donnees = request.get_json(silent=True) or {}
+    noms = donnees.get("villes")
+    if noms is None:
+        noms = [c["nom"] for c in communes.villes_suggerees(get_conn())]
+    villes = list(config.VILLES)
+    for nom in noms:
+        if nom and nom not in villes:
+            villes.append(nom)
+    config.enregistrer({"VILLES": villes})
+    return jsonify({"ok": True, "villes": villes})
 
 
 # ---------------------------------------------------------------------------

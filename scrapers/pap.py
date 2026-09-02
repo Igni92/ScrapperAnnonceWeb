@@ -13,13 +13,43 @@ BASE_URL = "https://www.pap.fr"
 # La recherche PAP est encodée dans l'URL ; on requête la page de résultats par ville.
 URL_RECHERCHE = BASE_URL + "/annonce/locations-{slug}-g{geo}-a-partir-de-{pieces}-pieces-jusqu-a-{prix}-euros"
 
-# Identifiants géographiques PAP (à compléter selon vos villes).
+# Identifiants géographiques PAP connus. Pour une ville absente, on interroge l'autocomplétion
+# du site (best effort : le site est protégé par Cloudflare et peut refuser).
 GEO_IDS = {
     "Paris": ("paris-75", "439"),
     "Montreuil": ("montreuil-93100", "37633"),
     "Vincennes": ("vincennes-94300", "37599"),
     "Saint-Mandé": ("saint-mande-94160", "37574"),
 }
+URL_AUTOCOMPLETE = BASE_URL + "/json/ac-geo"
+_geo_cache: dict[str, tuple[str, str] | None] = {}
+
+
+def _slug(texte: str) -> str:
+    import unicodedata
+    t = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "-", t).strip("-")
+
+
+def resoudre_geo(session, ville: str) -> tuple[str, str] | None:
+    """(slug, id) PAP pour une ville : table connue, sinon autocomplétion du site."""
+    if ville in GEO_IDS:
+        return GEO_IDS[ville]
+    if ville in _geo_cache:
+        return _geo_cache[ville]
+    resultat = None
+    donnees = base.get_json(session, URL_AUTOCOMPLETE, params={"q": ville})
+    for item in donnees if isinstance(donnees, list) else []:
+        nom = str(item.get("name") or item.get("nom") or "")
+        ident = item.get("id") or item.get("geo_id")
+        if ident and _slug(nom).startswith(_slug(ville)):
+            resultat = (_slug(nom), str(ident))
+            break
+    if resultat is None:
+        log.warning("PAP : identifiant géographique introuvable pour %s (ville ignorée). "
+                    "Ajoutez-le dans scrapers/pap.py GEO_IDS.", ville)
+    _geo_cache[ville] = resultat
+    return resultat
 
 
 def _parser_carte(carte, ville: str) -> dict | None:
@@ -65,10 +95,10 @@ def scraper(criteres: dict) -> list[dict]:
     session = base.session_http()
     annonces: list[dict] = []
     for ville in criteres.get("villes", []):
-        if ville not in GEO_IDS:
-            log.warning("PAP : identifiant géographique inconnu pour %s, ville ignorée", ville)
+        geo_info = resoudre_geo(session, ville)
+        if geo_info is None:
             continue
-        slug, geo = GEO_IDS[ville]
+        slug, geo = geo_info
         url = URL_RECHERCHE.format(slug=slug, geo=geo,
                                    pieces=criteres.get("pieces_min", 1),
                                    prix=int(criteres.get("prix_max", 99999)))

@@ -68,6 +68,7 @@ python -m pytest -q tests               # tests (aucun appel réseau ni modèle)
 | `config.py` | défauts + liste des paramètres modifiables (persistés dans `settings.json`) |
 | `scrapers/` | un module par site, chacun expose `scraper(criteres) -> list[dict]` avec le champ `photos` |
 | `trajets.py` | géocodage et temps de trajet réels (transports / voiture) avec cache |
+| `communes.py` | contours des communes, trajets par commune, villes suggérées |
 | `photo_analysis.py` | analyse des photos (backend `claude_code` ou `api`), JSON strict, lots avec throttling |
 | `db.py` | SQLite (table `annonces`), cache des analyses photo clé sur l'URL, favoris, notes |
 | `scoring.py` | `calculer_score(prix, surface, ville, score_etat, moisissure_detectee)` -> 0-100 |
@@ -107,6 +108,23 @@ Les résultats sont mis en cache en base (tables `geocodage` et `trajets_cache`)
 d'une même ville partagent le même calcul, donc quelques requêtes par lancement seulement.
 Après modification des destinations, lancez « Recalculer » pour mettre à jour les annonces
 existantes.
+
+## Carte interactive et communes suggérées
+
+Dans **Paramètres → Recherche**, une carte affiche les communes des départements choisis
+(`CARTE_DEPARTEMENTS`, 75/92/93/94 par défaut). Cliquez sur une commune pour l'ajouter ou la
+retirer des villes recherchées : le champ texte et la carte restent synchronisés.
+
+Lancez **« Évaluer les communes »** (page Lancer) pour calculer le trajet de chaque commune
+vers vos destinations (quelques minutes, résultats conservés en base). La carte se colore
+alors : vert = dans les temps de trajet, rouge = trop loin, gris = non évaluée. Les communes
+vertes absentes de votre liste sont proposées sous la carte, à ajouter d'un clic
+(individuellement ou « Tout ajouter »). L'option « Inclure automatiquement les communes
+suggérées » les ajoute au scraping sans passer par la liste.
+
+Contours fournis par geo.api.gouv.fr (avec secours france-geojson et opendata.paris.fr),
+fond de carte OpenStreetMap, bibliothèque Leaflet embarquée dans `static/leaflet/`.
+Les contours sont mis en cache dans le dossier `cache/`.
 
 ## Notation
 

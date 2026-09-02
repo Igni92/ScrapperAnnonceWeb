@@ -86,6 +86,21 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS communes_trajets (
+            code           TEXT PRIMARY KEY,   -- code INSEE
+            nom            TEXT NOT NULL,
+            dep            TEXT NOT NULL,
+            lat            REAL,
+            lon            REAL,
+            trajets        TEXT,               -- JSON {destination: {...}}
+            trajet_minutes REAL,               -- pire destination connue
+            ok             INTEGER,            -- 1 = dans les maximums, 0 = dépassé, NULL = inconnu
+            calcule_le     TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -190,6 +205,38 @@ def trajet_cache_set(conn: sqlite3.Connection, cle: str, minutes: float | None, 
         "INSERT OR REPLACE INTO trajets_cache (cle, minutes, detail, calcule_le) VALUES (?, ?, ?, ?)",
         (cle, minutes, json.dumps(detail or {}, ensure_ascii=False), _maintenant()),
     )
+    conn.commit()
+
+
+def commune_trajets_set(conn: sqlite3.Connection, code: str, nom: str, dep: str, lat: float, lon: float,
+                        trajets: dict, trajet_minutes: float | None, ok: bool | None) -> None:
+    conn.execute(
+        """INSERT OR REPLACE INTO communes_trajets
+               (code, nom, dep, lat, lon, trajets, trajet_minutes, ok, calcule_le)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (code, nom, dep, lat, lon, json.dumps(trajets, ensure_ascii=False), trajet_minutes,
+         _bool_vers_int(ok), _maintenant()),
+    )
+    conn.commit()
+
+
+def communes_trajets_get(conn: sqlite3.Connection, deps: list[str] | None = None) -> dict[str, dict]:
+    sql, params = "SELECT * FROM communes_trajets", []
+    if deps:
+        sql += " WHERE dep IN (" + ",".join("?" * len(deps)) + ")"
+        params = list(deps)
+    resultat = {}
+    for r in conn.execute(sql, params):
+        resultat[r["code"]] = {
+            "code": r["code"], "nom": r["nom"], "dep": r["dep"], "lat": r["lat"], "lon": r["lon"],
+            "trajets": _charger_json(r["trajets"], {}), "trajet_minutes": r["trajet_minutes"],
+            "ok": None if r["ok"] is None else bool(r["ok"]), "calcule_le": r["calcule_le"],
+        }
+    return resultat
+
+
+def vider_communes_trajets(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM communes_trajets")
     conn.commit()
 
 

@@ -14,6 +14,11 @@ SETTINGS_PATH = Path(__file__).with_name("settings.json")
 # ---------------------------------------------------------------------------
 VILLES = ["Paris", "Montreuil", "Vincennes", "Saint-Mandé"]
 SOURCES_ACTIVES = ["pap", "leboncoin", "seloger"]
+# Carte interactive : départements dont les communes sont affichées et évaluées.
+CARTE_DEPARTEMENTS = ["75", "92", "93", "94"]
+# Ajouter automatiquement au scraping les communes qui respectent les temps de trajet
+# (calculées par « Évaluer les communes » sur la page Lancer), même hors de VILLES.
+SUGGESTIONS_AUTO = False
 PRIX_MAX = 1500          # loyer mensuel max (€)
 PRIX_MIN_REF = 700       # loyer en dessous duquel le sous-score prix est à 100
 SURFACE_MIN = 30         # m²
@@ -116,10 +121,15 @@ WEB_PORT = 5000
 # ---------------------------------------------------------------------------
 # Paramètres modifiables depuis l'interface web
 # (nom, type, section, libellé, aide).
-# Types : int, float, str, bool, liste, dict_int, sources, destinations, choix:a|b
+# Types : int, float, str, bool, liste, villes, dict_int, sources, destinations, choix:a|b
 # ---------------------------------------------------------------------------
 PARAMETRES = [
-    ("VILLES", "liste", "Recherche", "Villes recherchées", "Séparées par des virgules."),
+    ("VILLES", "villes", "Recherche", "Villes recherchées",
+     "Séparées par des virgules, ou cliquez sur les communes de la carte."),
+    ("CARTE_DEPARTEMENTS", "liste", "Recherche", "Départements affichés sur la carte",
+     "Codes séparés par des virgules (75, 92, 93, 94, 91, 77, 78, 95)."),
+    ("SUGGESTIONS_AUTO", "bool", "Recherche", "Inclure automatiquement les communes suggérées",
+     "Au scraping, ajoute les communes de la carte qui respectent les temps de trajet."),
     ("SOURCES_ACTIVES", "sources", "Recherche", "Sites à scraper", ""),
     ("PRIX_MAX", "int", "Recherche", "Loyer maximum (€)", "Les annonces plus chères sont écartées."),
     ("SURFACE_MIN", "int", "Recherche", "Surface minimale (m²)", "Les annonces plus petites sont écartées."),

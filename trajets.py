@@ -132,6 +132,11 @@ def duree_transport(o: dict, d: dict, depart: datetime | None = None) -> tuple[f
     donnees = _get_json(f"{config.TRANSITOUS_URL}/api/v6/plan", params)
     itineraires = (donnees or {}).get("itineraries") or []
     if not itineraires:
+        # Origine et destination très proches : pas de transport, seulement la marche (« direct »).
+        directs = [d for d in (donnees or {}).get("direct") or [] if d.get("duration")]
+        if directs:
+            a_pied = min(directs, key=lambda d: d["duration"])
+            return a_pied["duration"] / 60.0, {"correspondances": 0, "lignes": [], "a_pied": True}
         return None, {"erreur": "pas d'itinéraire en transports"}
     meilleur = min(itineraires, key=lambda i: i.get("duration", 10**9))
     return meilleur["duration"] / 60.0, {

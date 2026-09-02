@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+import communes as communes_mod
 import config
 import db
 import jobs
@@ -189,3 +190,38 @@ def test_parametres_destinations(client, tmp_path):
         assert client.post("/parametres", data=form).status_code == 400
     finally:
         config.appliquer(sauvegarde)
+
+
+def test_api_communes_et_ajout_villes(client, tmp_path):
+    from tests.test_communes import FAUSSES, DEST
+    sauvegarde = config.exporter()
+    try:
+        conn = db.init_db()
+        db.commune_trajets_set(conn, "94065", "Rungis", "94", 48.75, 2.35,
+                               {"Rungis": {"mode": "transport", "minutes": 5, "max_minutes": 30, "detail": {}}}, 5, True)
+        db.commune_trajets_set(conn, "94080", "Vincennes", "94", 48.85, 2.44,
+                               {"Rungis": {"mode": "transport", "minutes": 49, "max_minutes": 30, "detail": {}}}, 49, False)
+        conn.close()
+        with patch.object(communes_mod, "charger_departements", return_value=FAUSSES), \
+             patch.object(config, "VILLES", ["Vincennes"]), patch.object(config, "CARTE_DEPARTEMENTS", ["94"]):
+            geo = client.get("/api/communes").get_json()
+            assert geo["type"] == "FeatureCollection" and len(geo["features"]) == 3
+            par_nom = {f["properties"]["nom"]: f["properties"] for f in geo["features"]}
+            assert par_nom["Rungis"]["ok"] is True and par_nom["Rungis"]["trajet_minutes"] == 5
+            assert par_nom["Vincennes"]["ok"] is False and par_nom["L'Haÿ-les-Roses"]["ok"] is None
+
+            sugg = client.get("/api/suggestions").get_json()
+            assert [s["nom"] for s in sugg] == ["Rungis"]
+
+            r = client.post("/parametres/ajouter-villes", json={})
+            assert r.get_json()["villes"] == ["Vincennes", "Rungis"]
+            r = client.post("/parametres/ajouter-villes", json={"villes": ["Rungis", "Orly"]})
+            assert r.get_json()["villes"] == ["Vincennes", "Rungis", "Orly"]
+            assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))["VILLES"] == ["Vincennes", "Rungis", "Orly"]
+    finally:
+        config.appliquer(sauvegarde)
+
+
+def test_page_parametres_contient_la_carte(client):
+    page = client.get("/parametres").get_data(as_text=True)
+    assert 'id="carte"' in page and "leaflet" in page

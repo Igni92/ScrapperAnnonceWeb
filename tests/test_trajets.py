@@ -94,6 +94,17 @@ def test_echec_reseau_non_mis_en_cache(conn):
         assert http.call_count > n            # nouvel essai : l'échec n'a pas été mis en cache
 
 
+def test_transport_a_pied_quand_pas_d_itineraire(conn):
+    def reponses(url, params=None):
+        if "/plan" in url:
+            return {"itineraries": [], "direct": [{"duration": 600}, {"duration": 900}]}
+        return _reponses(url, params)
+    annonce = {"ville": "Rungis"}
+    with patch.object(trajets, "_get_json", side_effect=reponses):
+        t = trajets.calculer_trajets(conn, annonce, [DEST_RUNGIS])
+    assert t["Rungis"]["minutes"] == 10 and t["Rungis"]["detail"]["a_pied"] is True
+
+
 def test_sans_destination(conn):
     annonce = {"ville": "Vincennes"}
     with patch.object(trajets, "_get_json", side_effect=AssertionError("aucun appel attendu")):

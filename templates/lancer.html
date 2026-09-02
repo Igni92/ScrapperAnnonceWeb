@@ -10,6 +10,7 @@
   <div class="mode"><strong>Scraping complet</strong><p>Récupère les annonces, filtre, analyse les photos des nouvelles annonces et les classe. Les annonces déjà en base ne sont jamais ré-analysées.</p><button data-mode="complet">Lancer</button></div>
   <div class="mode"><strong>Scraping rapide</strong><p>Récupère et classe sans analyser les photos. Idéal pour un premier tri prix / trajet / surface.</p><button data-mode="rapide">Lancer</button></div>
   <div class="mode"><strong>Analyser les photos en attente</strong><p>Analyse les annonces en base jamais analysées (scraping rapide, erreurs, ré-analyses demandées).</p><button data-mode="manquantes">Lancer</button></div>
+  <div class="mode"><strong>Évaluer les communes</strong><p>Calcule le temps de trajet de chaque commune de la carte vers vos destinations, pour colorer la carte et proposer des villes hors de votre liste. Quelques minutes, résultats conservés.</p><button data-mode="suggestions" class="sec">Lancer</button></div>
   <div class="mode"><strong>Recalculer les scores</strong><p>Réapplique la pondération et les critères actuels à toutes les annonces, sans scraping ni analyse.</p><button data-mode="recalculer" class="sec">Lancer</button></div>
 </div>
 
@@ -22,7 +23,7 @@
 <table><thead><tr><th>Traitement</th><th>Statut</th><th class="num">Durée</th><th>Résultat</th></tr></thead><tbody>
 {% for j in historique %}
 <tr><td>{{ modes.get(j.mode, j.mode) }}</td><td>{{ j.statut }}</td><td class="num">{{ j.etat().duree }} s</td>
-<td class="sous">{% if j.resume %}{{ j.resume.nouvelles }} nouvelle(s), {{ j.resume.analysees }} analysée(s), {{ j.resume.recalculees }} recalculée(s){% elif j.erreur %}{{ j.erreur }}{% endif %}</td></tr>
+<td class="sous">{% if j.resume %}{{ j.resume.nouvelles }} nouvelle(s), {{ j.resume.analysees }} analysée(s), {{ j.resume.recalculees }} recalculée(s), {{ j.resume.get('communes', 0) }} commune(s){% elif j.erreur %}{{ j.erreur }}{% endif %}</td></tr>
 {% endfor %}
 </tbody></table>
 {% endif %}
@@ -54,7 +55,8 @@
     if (j.statut === "en_cours" || j.statut === "en_attente") { verrouiller(true); minuteur = setTimeout(suivre, 1500); }
     else {
       verrouiller(false);
-      if (j.resume) resume.innerHTML = `${j.resume.nouvelles} nouvelle(s) annonce(s), ${j.resume.analysees} analysée(s), ${j.resume.recalculees} score(s) recalculé(s). <a href="/">Voir les annonces</a>`;
+      if (j.resume && j.mode === "suggestions") resume.innerHTML = `${j.resume.communes} commune(s) évaluée(s). <a href="/parametres">Voir la carte et les suggestions</a>`;
+      else if (j.resume) resume.innerHTML = `${j.resume.nouvelles} nouvelle(s) annonce(s), ${j.resume.analysees} analysée(s), ${j.resume.recalculees} score(s) recalculé(s). <a href="/">Voir les annonces</a>`;
       if (j.erreur) resume.textContent = j.erreur;
     }
   }

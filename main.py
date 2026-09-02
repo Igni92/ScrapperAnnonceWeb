@@ -7,6 +7,7 @@ import argparse
 import logging
 import sys
 
+import communes
 import config
 import db
 import photo_analysis
@@ -21,6 +22,7 @@ MODES = {
     "rapide": "Scraping + trajets (sans analyse photo)",
     "manquantes": "Analyse photo des annonces en attente",
     "recalculer": "Recalcul des trajets et des scores avec les paramètres actuels",
+    "suggestions": "Évaluation des communes de la carte (temps de trajet vers les destinations)",
 }
 
 
@@ -28,8 +30,12 @@ MODES = {
 # Étapes
 # ---------------------------------------------------------------------------
 def scraper_tout(sources: list[str]) -> list[dict]:
+    villes = communes.villes_pour_scraping()
+    if len(villes) > len(config.VILLES):
+        log.info("Villes suggérées ajoutées au scraping : %s",
+                 ", ".join(v for v in villes if v not in config.VILLES))
     criteres = {
-        "villes": config.VILLES,
+        "villes": villes,
         "prix_max": config.PRIX_MAX,
         "surface_min": config.SURFACE_MIN,
         "pieces_min": config.PIECES_MIN,
@@ -144,13 +150,34 @@ def recalculer_scores(conn) -> int:
     return len(annonces)
 
 
+def evaluer_communes(conn) -> int:
+    """Calcule le trajet de chaque commune des départements de la carte vers les destinations."""
+    if not config.DESTINATIONS:
+        log.warning("Aucune destination configurée : rien à évaluer.")
+        return 0
+    deps = list(config.CARTE_DEPARTEMENTS)
+    log.info("Évaluation des communes des départements %s vers %s…", ", ".join(deps),
+             ", ".join(d["nom"] for d in config.DESTINATIONS))
+
+    def progression(i, total, c):
+        if i % 10 == 0 or i == total:
+            log.info("  %d/%d communes évaluées (dernière : %s)", i, total, c["nom"])
+
+    n = communes.calculer_trajets_communes(conn, deps, progression=progression)
+    suggestions = communes.villes_suggerees(conn, deps)
+    log.info("%d commune(s) évaluée(s), %d dans les temps de trajet hors de vos villes : %s",
+             n, len(suggestions), ", ".join(c["nom"] for c in suggestions[:30]) or "aucune")
+    return n
+
+
 def executer(mode: str, sources: list[str] | None = None, max_photos: int | None = None,
              conn=None) -> dict:
     """Exécute un mode de MODES et renvoie un résumé chiffré."""
     if mode not in MODES:
         raise ValueError(f"Mode inconnu : {mode}")
     conn = conn or db.init_db()
-    resume = {"mode": mode, "brutes": 0, "filtrees": 0, "nouvelles": 0, "analysees": 0, "recalculees": 0}
+    resume = {"mode": mode, "brutes": 0, "filtrees": 0, "nouvelles": 0, "analysees": 0, "recalculees": 0,
+              "communes": 0}
     log.info("Démarrage : %s", MODES[mode])
 
     if mode in ("complet", "rapide"):
@@ -175,6 +202,8 @@ def executer(mode: str, sources: list[str] | None = None, max_photos: int | None
         resume["analysees"] = analyser_manquantes(conn, max_photos)
     elif mode == "recalculer":
         resume["recalculees"] = recalculer_scores(conn)
+    elif mode == "suggestions":
+        resume["communes"] = evaluer_communes(conn)
 
     log.info("Terminé : %s", MODES[mode])
     return resume
@@ -241,6 +270,8 @@ def parser_args(argv=None) -> argparse.Namespace:
                    help="analyser les photos des annonces déjà en base mais jamais analysées")
     p.add_argument("--recalculer", action="store_true",
                    help="recalculer tous les scores avec la pondération actuelle")
+    p.add_argument("--evaluer-communes", action="store_true",
+                   help="calculer le trajet de chaque commune de la carte vers les destinations")
     p.add_argument("--max-photos", type=int, default=None,
                    help=f"photos max par annonce (défaut : {config.MAX_PHOTOS_PAR_ANNONCE})")
     p.add_argument("--sources", default=None,
@@ -274,6 +305,8 @@ def main(argv=None) -> int:
         executer("manquantes", max_photos=args.max_photos, conn=conn)
     if args.recalculer:
         executer("recalculer", conn=conn)
+    if args.evaluer_communes:
+        executer("suggestions", conn=conn)
 
     afficher_classement(db.lister_annonces(conn), limite=args.limite)
     return 0
