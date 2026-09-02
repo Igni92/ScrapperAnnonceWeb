@@ -39,6 +39,7 @@ def _client_par_titre():
 def _lancer(args, client, tmp_path):
     with patch.object(config, "DB_PATH", str(tmp_path / "t.db")), \
          patch.object(config, "PHOTO_BACKEND", "api"), \
+         patch.object(config, "DESTINATIONS", []), \
          patch.dict(main.SCRAPERS, {"pap": _faux_scraper}, clear=True), \
          patch.object(pa, "get_client", return_value=client), \
          patch.object(pa, "telecharger_photo", return_value=("image/jpeg", b"AAAA")), \
@@ -83,3 +84,24 @@ def test_erreur_api_non_mise_en_cache(tmp_path):
     conn = db.init_db(str(tmp_path / "t.db"))
     en_attente = {a["url"] for a in db.annonces_sans_analyse(conn)}
     assert en_attente == {"https://ex.com/propre", "https://ex.com/moisi"}
+
+
+def test_pipeline_ecarte_les_trajets_trop_longs(tmp_path):
+    import trajets
+
+    def faux_calcul(conn, annonce, destinations=None):
+        minutes = 45 if "moisi" in annonce["url"] else 20
+        annonce["trajets"] = {"Rungis": {"mode": "transport", "minutes": minutes, "max_minutes": 30, "detail": {}}}
+        annonce["trajet_minutes"] = minutes
+        return annonce["trajets"]
+
+    with patch.object(config, "DB_PATH", str(tmp_path / "t.db")), \
+         patch.object(config, "DESTINATIONS", [{"nom": "Rungis", "adresse": "Rungis", "mode": "transport", "max_minutes": 30}]), \
+         patch.dict(main.SCRAPERS, {"pap": _faux_scraper}, clear=True), \
+         patch.object(trajets, "calculer_trajets", side_effect=faux_calcul):
+        assert main.main(["--sources", "pap", "--skip-photos"]) == 0
+        conn = db.init_db(str(tmp_path / "t.db"))
+        urls = {a["url"] for a in db.lister_annonces(conn)}
+    assert "https://ex.com/moisi" not in urls and "https://ex.com/propre" in urls
+    propre = next(a for a in db.lister_annonces(conn) if a["url"].endswith("propre"))
+    assert propre["trajet_minutes"] == 20 and propre["trajets"]["Rungis"]["minutes"] == 20

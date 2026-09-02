@@ -44,9 +44,9 @@ python main.py           # ou version console : scraping + analyse + classement
   ré-analyse des photos, suppression.
 - **Lancer** : scraping complet, scraping rapide (sans photos), analyse des photos en
   attente, recalcul des scores. Journal en direct, un seul traitement à la fois.
-- **Paramètres** : villes, sites, loyer / surface / pièces, temps de trajet par ville,
-  pondération (avec contrôle de la somme), pénalité moisissure, moteur et réglages de
-  l'analyse photo. Sauvegardés dans `settings.json`.
+- **Paramètres** : villes, sites, loyer / surface / pièces, destinations et temps de trajet
+  maximum, pondération (avec contrôle de la somme), pénalité moisissure, moteur et réglages
+  de l'analyse photo. Sauvegardés dans `settings.json`.
 
 ## Version console
 
@@ -67,6 +67,7 @@ python -m pytest -q tests               # tests (aucun appel réseau ni modèle)
 | `jobs.py` | exécution en arrière-plan des traitements + capture du journal |
 | `config.py` | défauts + liste des paramètres modifiables (persistés dans `settings.json`) |
 | `scrapers/` | un module par site, chacun expose `scraper(criteres) -> list[dict]` avec le champ `photos` |
+| `trajets.py` | géocodage et temps de trajet réels (transports / voiture) avec cache |
 | `photo_analysis.py` | analyse des photos (backend `claude_code` ou `api`), JSON strict, lots avec throttling |
 | `db.py` | SQLite (table `annonces`), cache des analyses photo clé sur l'URL, favoris, notes |
 | `scoring.py` | `calculer_score(prix, surface, ville, score_etat, moisissure_detectee)` -> 0-100 |
@@ -84,6 +85,28 @@ python -m pytest -q tests               # tests (aucun appel réseau ni modèle)
 - Moins de `PHOTO_MIN_POUR_ANALYSE` photos exploitables => score neutre, aucune pénalité.
 - **Cache** : une URL déjà en base n'est jamais ré-analysée. Une erreur technique n'est pas
   mise en cache : l'annonce reste "à analyser" et sera reprise par « Analyser les photos en attente ».
+
+## Trajets réels
+
+Dans **Paramètres → Trajets**, ajoutez une ou plusieurs destinations (nom, adresse ou ville,
+mode transports en commun ou voiture, durée maximale). Pour chaque nouvelle annonce, le trajet
+est calculé depuis son adresse (ou sa ville et son code postal) vers chaque destination, au
+prochain jour de semaine à l'heure de référence (08:30 par défaut). Une annonce qui dépasse le
+maximum d'une destination est écartée avant l'analyse photo. La durée la plus longue sert au
+sous-score trajet.
+
+Services utilisés, gratuits et sans clé, à réserver à un usage personnel léger :
+
+| Service | Rôle | Politique |
+|---|---|---|
+| Base Adresse Nationale (data.geopf.fr) | géocodage des villes / adresses | 50 requêtes/s |
+| OSRM, serveur de démonstration FOSSGIS | trajets en voiture | 1 requête/s, non commercial |
+| Transitous (api.transitous.org) | trajets en transports en commun | projet bénévole, non commercial, User-Agent avec contact |
+
+Les résultats sont mis en cache en base (tables `geocodage` et `trajets_cache`) : les annonces
+d'une même ville partagent le même calcul, donc quelques requêtes par lancement seulement.
+Après modification des destinations, lancez « Recalculer » pour mettre à jour les annonces
+existantes.
 
 ## Notation
 

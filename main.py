@@ -11,15 +11,16 @@ import config
 import db
 import photo_analysis
 import scoring
+import trajets
 from scrapers import SCRAPERS
 
 log = logging.getLogger("main")
 
 MODES = {
-    "complet": "Scraping + analyse photo des nouvelles annonces",
-    "rapide": "Scraping seul (sans analyse photo)",
+    "complet": "Scraping + trajets + analyse photo des nouvelles annonces",
+    "rapide": "Scraping + trajets (sans analyse photo)",
     "manquantes": "Analyse photo des annonces en attente",
-    "recalculer": "Recalcul des scores avec la pondération actuelle",
+    "recalculer": "Recalcul des trajets et des scores avec les paramètres actuels",
 }
 
 
@@ -58,6 +59,23 @@ def filtrer(annonces: list[dict]) -> list[dict]:
         if a.get("pieces") is not None and a["pieces"] < config.PIECES_MIN:
             continue
         gardees.append(a)
+    return gardees
+
+
+def calculer_trajets(conn, annonces: list[dict]) -> list[dict]:
+    """Calcule les trajets vers les destinations et écarte les annonces au-delà des maximums."""
+    if not config.DESTINATIONS or not annonces:
+        return annonces
+    log.info("Calcul des trajets vers %s pour %d annonce(s)…",
+             ", ".join(d["nom"] for d in config.DESTINATIONS), len(annonces))
+    gardees = []
+    for a in annonces:
+        trajets.calculer_trajets(conn, a)
+        if trajets.respecte_maximums(a):
+            gardees.append(a)
+        else:
+            log.info("Écartée (trajet) : %s — %s", a.get("titre") or a["url"], trajets.resume_trajets(a["trajets"]))
+    log.info("%d annonce(s) dans les temps de trajet, %d écartée(s)", len(gardees), len(annonces) - len(gardees))
     return gardees
 
 
@@ -111,10 +129,17 @@ def analyser_manquantes(conn, max_photos: int | None) -> int:
 
 
 def recalculer_scores(conn) -> int:
-    """Recalcule le score de toutes les annonces (après changement de pondération)."""
+    """Recalcule trajets (avec cache) et score de toutes les annonces (après changement de paramètres)."""
     annonces = db.toutes_annonces(conn)
+    if config.DESTINATIONS:
+        log.info("Recalcul des trajets vers %s…", ", ".join(d["nom"] for d in config.DESTINATIONS))
     for a in annonces:
-        db.maj_score(conn, a["url"], scoring.calculer_score_annonce(a))
+        if config.DESTINATIONS:
+            trajets.calculer_trajets(conn, a)
+        else:
+            a["trajets"], a["trajet_minutes"] = None, None
+        score = scoring.calculer_score_annonce(a)
+        db.maj_trajets(conn, a["url"], a["trajets"], a["trajet_minutes"], score=score)
     log.info("%d score(s) recalculé(s)", len(annonces))
     return len(annonces)
 
@@ -134,9 +159,11 @@ def executer(mode: str, sources: list[str] | None = None, max_photos: int | None
         candidates = dedupliquer(filtrer(brutes))
         connues = db.urls_connues(conn, (a["url"] for a in candidates))
         nouvelles = [a for a in candidates if a["url"] not in connues]
-        resume.update(brutes=len(brutes), filtrees=len(candidates), nouvelles=len(nouvelles))
         log.info("%d annonce(s) après filtrage (%d brutes), %d nouvelle(s), %d déjà en base",
                  len(candidates), len(brutes), len(nouvelles), len(connues))
+        # Trajets uniquement pour les nouvelles annonces (les autres sont déjà en base, avec cache).
+        nouvelles = calculer_trajets(conn, nouvelles)
+        resume.update(brutes=len(brutes), filtrees=len(candidates), nouvelles=len(nouvelles))
         if mode == "rapide":
             for a in nouvelles:
                 a["score"] = scoring.calculer_score_annonce(a)
@@ -164,7 +191,7 @@ def _tronquer(texte: str, longueur: int) -> str:
 def afficher_classement(annonces: list[dict], limite: int = 30) -> None:
     classees = sorted(annonces, key=lambda a: (a.get("score") is None, -(a.get("score") or 0)))
     print()
-    print(f"{'#':>3}  {'Score':>5}  {'État':>5}  {'Prix':>6}  {'Surf.':>6}  {'P.':>2}  "
+    print(f"{'#':>3}  {'Score':>5}  {'État':>5}  {'Trajet':>6}  {'Prix':>6}  {'Surf.':>6}  {'P.':>2}  "
           f"{'Ville':<14} {'Source':<9} Titre")
     print("-" * 110)
     alertes = []
@@ -175,8 +202,10 @@ def afficher_classement(annonces: list[dict], limite: int = 30) -> None:
         moisissure = bool(analyse.get("moisissure_detectee"))
         drapeau = " ⚠ MOISISSURE" if moisissure else ""
         score = a.get("score")
+        trajet = a.get("trajet_minutes")
         print(
             f"{rang:>3}  {score if score is not None else '?':>5}  {etat_txt}  "
+            f"{str(int(trajet)) + 'mn' if trajet is not None else 'n/a':>6}  "
             f"{int(a['prix']) if a.get('prix') else '?':>6}  "
             f"{a['surface'] if a.get('surface') else '?':>6}  "
             f"{a['pieces'] if a.get('pieces') else '?':>2}  "
@@ -184,6 +213,8 @@ def afficher_classement(annonces: list[dict], limite: int = 30) -> None:
             f"{_tronquer(a.get('titre'), 40)}{drapeau}"
         )
         print(f"{'':>3}  {a['url']}")
+        if a.get("trajets"):
+            print(f"{'':>3}  ↳ {trajets.resume_trajets(a['trajets'])}")
         if analyse.get("resume"):
             print(f"{'':>3}  ↳ {_tronquer(analyse['resume'], 100)}")
         if moisissure:

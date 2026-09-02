@@ -133,11 +133,29 @@ def extraire_photos_generique(soup: BeautifulSoup, page_url: str,
     return limiter_photos(filtres, maximum)
 
 
-def normaliser_annonce(source: str, titre, ville, prix, surface, pieces, url, photos) -> dict:
+def code_postal_dans(texte) -> str | None:
+    """Extrait un code postal français (5 chiffres) d'un texte libre, ex. « Paris 12e (75012) »."""
+    if not texte:
+        return None
+    m = re.search(r"\b(\d{5})\b", str(texte))
+    return m.group(1) if m else None
+
+
+def nettoyer_ville(texte) -> str:
+    """« Paris 12e (75012) » -> « Paris 12e » ; « Montreuil (93100) » -> « Montreuil »."""
+    if not texte:
+        return ""
+    return re.sub(r"\s*\(?\b\d{5}\b\)?", "", str(texte)).strip(" ,-")
+
+
+def normaliser_annonce(source: str, titre, ville, prix, surface, pieces, url, photos,
+                       code_postal=None, adresse=None) -> dict:
     return {
         "source": source,
         "titre": (titre or "").strip(),
-        "ville": (ville or "").strip(),
+        "ville": nettoyer_ville(ville),
+        "code_postal": (str(code_postal).strip() if code_postal else None) or code_postal_dans(ville),
+        "adresse": (adresse or "").strip() or None,
         "prix": nombre(prix),
         "surface": nombre(surface),
         "pieces": entier(pieces),

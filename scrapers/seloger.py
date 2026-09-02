@@ -52,12 +52,17 @@ def _parser_carte(carte) -> dict | None:
             pieces = base.entier(t)
 
     ville_el = carte.select_one("[data-testid*='address'], [class*='Address'], address")
-    ville = ville_el.get_text(" ", strip=True) if ville_el else ""
+    localisation = ville_el.get_text(" ", strip=True) if ville_el else ""
+    # SeLoger affiche souvent « Rue X, Ville (75012) » : on sépare l'adresse de la ville.
+    adresse, ville = None, localisation
+    if "," in localisation:
+        adresse, ville = [p.strip() for p in localisation.rsplit(",", 1)]
 
     photos = [img.get("data-src") or img.get("src") for img in carte.select("img")]
     if prix is None and "€" in texte:
         prix = base.nombre(texte.split("€")[0][-12:])
-    return base.normaliser_annonce(SOURCE, titre, ville, prix, surface, pieces, url, photos)
+    return base.normaliser_annonce(SOURCE, titre, ville, prix, surface, pieces, url, photos,
+                                   code_postal=base.code_postal_dans(localisation), adresse=adresse)
 
 
 def _photos_detail(session, url: str) -> list[str]:

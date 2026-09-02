@@ -15,6 +15,7 @@ import jobs
 import main as pipeline
 import photo_analysis
 import scoring
+import trajets
 from scrapers import SCRAPERS
 
 app = Flask(__name__)
@@ -53,6 +54,11 @@ def filtre_euros(valeur):
     return f"{int(valeur):,}".replace(",", " ") + " €" if valeur is not None else "?"
 
 
+@app.template_filter("trajets_texte")
+def filtre_trajets(valeur):
+    return trajets.resume_trajets(valeur)
+
+
 @app.template_filter("date_courte")
 def filtre_date(valeur):
     return (valeur or "")[:16].replace("T", " ")
@@ -81,6 +87,7 @@ def annonces():
         "masquees": request.args.get("masquees") == "1",
         "q": request.args.get("q") or None,
         "score_min": _float_ou_none(request.args.get("score_min")),
+        "trajet_max": _float_ou_none(request.args.get("trajet_max")),
         "tri": request.args.get("tri") or "score",
     }
     liste = db.rechercher_annonces(conn, **filtres)
@@ -91,6 +98,7 @@ def annonces():
         stats=db.statistiques(conn),
         distinctes=db.valeurs_distinctes(conn),
         tris=db.TRIS,
+        destinations=config.DESTINATIONS,
     )
 
 
@@ -104,14 +112,16 @@ def annonce(annonce_id: int):
                                         "points_negatifs": [], "resume": None,
                                         "nb_photos_analysees": None, "analyse_le": None}
     sous_scores = {
-        "Trajet": (scoring.score_trajet(a["ville"]), config.POIDS_TRAJET),
+        "Trajet": (scoring.score_trajet(a["ville"], a.get("trajet_minutes")), config.POIDS_TRAJET),
         "Prix": (scoring.score_prix(a["prix"]), config.POIDS_PRIX),
         "Surface": (scoring.score_surface(a["surface"]), config.POIDS_SURFACE),
         "État (photos)": (analyse.get("score_etat") if analyse.get("score_etat") is not None
                           else config.PHOTO_SCORE_NEUTRE, config.POIDS_PHOTO),
     }
     return render_template("annonce.html", a=a, analyse=analyse, sous_scores=sous_scores,
-                           trajet_minutes=config.TRAJET_MINUTES.get(a["ville"], config.TRAJET_DEFAUT))
+                           trajet_minutes=scoring.minutes_trajet(a["ville"], a.get("trajet_minutes")),
+                           trajet_reel=a.get("trajet_minutes") is not None,
+                           origine=trajets.origine_annonce(a), modes=trajets.MODES)
 
 
 @app.post("/annonce/<int:annonce_id>/<action>")
@@ -169,6 +179,10 @@ def parser_formulaire(form) -> tuple[dict, list[str]]:
                 valeurs[nom] = [v.strip() for v in brut.split(",") if v.strip()]
             elif type_ == "sources":
                 valeurs[nom] = [s for s in form.getlist(nom) if s in SCRAPERS]
+            elif type_ == "bool":
+                valeurs[nom] = form.get(nom) in ("1", "on", "true", "oui")
+            elif type_ == "destinations":
+                valeurs[nom] = _parser_destinations(form)
             elif type_ == "dict_int":
                 table = {}
                 for ligne in brut.splitlines():
@@ -195,9 +209,40 @@ def parser_formulaire(form) -> tuple[dict, list[str]]:
             erreurs.append("Les poids doivent être positifs.")
         if not valeurs["VILLES"]:
             erreurs.append("Indiquez au moins une ville.")
+        try:
+            h, m = (int(x) for x in valeurs["TRAJET_HEURE_DEPART"].split(":"))
+            if not (0 <= h < 24 and 0 <= m < 60):
+                raise ValueError
+        except ValueError:
+            erreurs.append("Heure de départ : format attendu HH:MM (ex. 08:30).")
         if not valeurs["SOURCES_ACTIVES"]:
             erreurs.append("Cochez au moins un site.")
     return valeurs, erreurs
+
+
+def _parser_destinations(form) -> list[dict]:
+    """Lit les lignes du tableau de destinations (champs DEST_nom/DEST_adresse/DEST_mode/DEST_max)."""
+    noms = form.getlist("DEST_nom")
+    adresses = form.getlist("DEST_adresse")
+    modes = form.getlist("DEST_mode")
+    maxis = form.getlist("DEST_max")
+    destinations = []
+    for i, adresse in enumerate(adresses):
+        adresse = adresse.strip()
+        nom = (noms[i] if i < len(noms) else "").strip()
+        if not adresse and not nom:
+            continue                      # ligne vide
+        if not adresse:
+            raise ValueError(f"destination « {nom} » sans adresse")
+        mode = modes[i] if i < len(modes) else "transport"
+        if mode not in trajets.MODES:
+            raise ValueError(f"mode inconnu « {mode} »")
+        brut_max = (maxis[i] if i < len(maxis) else "").strip()
+        max_minutes = int(float(brut_max)) if brut_max else None
+        if max_minutes is not None and max_minutes <= 0:
+            raise ValueError(f"durée maximale invalide pour « {nom or adresse} »")
+        destinations.append({"nom": nom or adresse, "adresse": adresse, "mode": mode, "max_minutes": max_minutes})
+    return destinations
 
 
 @app.route("/parametres", methods=["GET", "POST"])
@@ -208,12 +253,18 @@ def parametres():
             for e in erreurs:
                 flash(e, "erreur")
             return render_template("parametres.html", valeurs=_valeurs_formulaire(valeurs),
-                                   sections=_sections(), cli_ok=photo_analysis.cli_disponible()), 400
+                                   sections=_sections(), cli_ok=photo_analysis.cli_disponible(),
+                                   modes_trajet=trajets.MODES), 400
+        anciennes = config.exporter()
         config.enregistrer(valeurs)
-        flash("Paramètres enregistrés. Pensez à « Recalculer les scores » si vous avez modifié la pondération.", "ok")
+        if anciennes["DESTINATIONS"] != valeurs["DESTINATIONS"] or anciennes["TRAJET_HEURE_DEPART"] != valeurs["TRAJET_HEURE_DEPART"]:
+            flash("Destinations modifiées : lancez « Recalculer » pour mettre à jour les trajets et scores des annonces existantes.", "ok")
+        else:
+            flash("Paramètres enregistrés. Pensez à « Recalculer » si vous avez modifié la pondération.", "ok")
         return redirect(url_for("parametres"))
     return render_template("parametres.html", valeurs=_valeurs_formulaire(config.exporter()),
-                           sections=_sections(), cli_ok=photo_analysis.cli_disponible())
+                           sections=_sections(), cli_ok=photo_analysis.cli_disponible(),
+                           modes_trajet=trajets.MODES)
 
 
 def _sections() -> list[tuple[str, list]]:

@@ -38,9 +38,14 @@ def _parser_carte(carte, ville: str) -> dict | None:
         elif "pièce" in texte:
             pieces = base.entier(texte)
 
+    # Localisation affichée (ex. « Paris 12e (75012) ») : plus précise que la ville recherchée.
+    loc = carte.select_one(".item-description strong, .item-location, [class*='location']")
+    localisation = loc.get_text(" ", strip=True) if loc else ""
+    ville_precise = base.nettoyer_ville(localisation) or ville
     # Photos visibles dès la liste (vignettes) : on complète ensuite avec la page détail.
     photos = [img.get("data-src") or img.get("src") for img in carte.select("img")]
-    return base.normaliser_annonce(SOURCE, titre, ville, prix, surface, pieces, url, photos)
+    return base.normaliser_annonce(SOURCE, titre, ville_precise, prix, surface, pieces, url, photos,
+                                   code_postal=base.code_postal_dans(localisation) or base.code_postal_dans(titre))
 
 
 def _photos_detail(session, url: str) -> list[str]:

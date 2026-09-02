@@ -30,9 +30,10 @@
       <option value="1" {{ 'selected' if filtres.moisissure == true }}>Avec</option>
     </select></label>
   <label>Score min <input type="number" name="score_min" min="0" max="100" value="{{ filtres.score_min|int if filtres.score_min is not none else '' }}" style="width:90px"></label>
+  {% if destinations %}<label>Trajet max (min) <input type="number" name="trajet_max" min="1" value="{{ filtres.trajet_max|int if filtres.trajet_max is not none else '' }}" style="width:90px"></label>{% endif %}
   <label>Tri
     <select name="tri">
-      {% for cle, lib in [('score','Score'),('etat','État'),('prix','Prix croissant'),('surface','Surface'),('recent','Plus récentes')] %}
+      {% for cle, lib in [('score','Score'),('trajet','Trajet le plus court'),('etat','État'),('prix','Prix croissant'),('surface','Surface'),('recent','Plus récentes')] %}
       <option value="{{ cle }}" {{ 'selected' if filtres.tri == cle }}>{{ lib }}</option>
       {% endfor %}
     </select></label>
@@ -50,7 +51,7 @@
 {% else %}
 <table>
   <thead><tr>
-    <th></th><th>Annonce</th><th class="num">Score</th><th class="num">État</th><th class="num">Loyer</th><th class="num">Surface</th><th class="num">Pièces</th><th>Ville</th><th></th>
+    <th></th><th>Annonce</th><th class="num">Score</th><th class="num">État</th>{% if destinations %}<th>Trajet</th>{% endif %}<th class="num">Loyer</th><th class="num">Surface</th><th class="num">Pièces</th><th>Ville</th><th></th>
   </tr></thead>
   <tbody>
   {% for a in annonces %}
@@ -64,10 +65,16 @@
         <span class="badge src">{{ a.source }}</span>
         {% if an.moisissure_detectee %}<span class="badge alerte">⚠ moisissure</span>{% endif %}
         {% if a.favori %}<span title="Favori">⭐</span>{% endif %}
+        {% if a.code_postal or a.adresse %}<span class="sous">{{ a.adresse or '' }} {{ a.code_postal or '' }}</span>{% endif %}
         {% if an.resume %}<div class="sous">{{ an.resume|truncate(120) }}</div>{% endif %}
       </td>
       <td class="num"><span class="score {{ classe_score(a.score) }}">{{ '%.0f'|format(a.score) if a.score is not none else '–' }}</span></td>
       <td class="num">{% if an.score_etat is not none %}<span class="score {{ classe_score(an.score_etat) }}">{{ an.score_etat }}</span>{% else %}<span class="badge neutre">à analyser</span>{% endif %}</td>
+      {% if destinations %}<td class="trajet">
+        {% if a.trajets %}{% for nom, t in a.trajets.items() %}
+          <div class="{{ 'ko' if t.minutes is not none and t.max_minutes is not none and t.minutes > t.max_minutes }}" title="{{ nom }} ({{ t.mode }})">{{ '🚇' if t.mode == 'transport' else '🚗' }} {{ t.minutes|int ~ ' min' if t.minutes is not none else '?' }}{% if a.trajets|length > 1 %} <span class="sous">{{ nom }}</span>{% endif %}</div>
+        {% endfor %}{% else %}<span class="badge neutre">à calculer</span>{% endif %}
+      </td>{% endif %}
       <td class="num">{{ a.prix|euros }}</td>
       <td class="num">{{ a.surface|int if a.surface else '?' }} m²</td>
       <td class="num">{{ a.pieces or '?' }}</td>

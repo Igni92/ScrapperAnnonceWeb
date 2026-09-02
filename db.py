@@ -20,10 +20,15 @@ COLONNES_SUPPLEMENTAIRES = {
     "favori": "INTEGER NOT NULL DEFAULT 0",
     "masquee": "INTEGER NOT NULL DEFAULT 0",
     "notes": "TEXT",
+    "code_postal": "TEXT",
+    "adresse": "TEXT",
+    "trajets": "TEXT",                 # JSON : {nom_destination: {"mode": ..., "minutes": ..., "max_minutes": ...}}
+    "trajet_minutes": "REAL",          # durée retenue pour la notation (pire destination), NULL si inconnue
 }
 
 TRIS = {
     "score": "score DESC NULLS LAST, id DESC",
+    "trajet": "trajet_minutes ASC NULLS LAST",
     "prix": "prix ASC NULLS LAST",
     "surface": "surface DESC NULLS LAST",
     "etat": "score_etat DESC NULLS LAST",
@@ -59,6 +64,28 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
     for nom, type_sql in COLONNES_SUPPLEMENTAIRES.items():
         if nom not in existantes:
             conn.execute(f"ALTER TABLE annonces ADD COLUMN {nom} {type_sql}")
+    # Caches réseau : géocodage et durées de trajet (évite de rappeler les API à chaque run).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS geocodage (
+            requete   TEXT PRIMARY KEY,
+            lat       REAL,
+            lon       REAL,
+            libelle   TEXT,
+            calcule_le TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trajets_cache (
+            cle        TEXT PRIMARY KEY,   -- origine|destination|mode|heure
+            minutes    REAL,               -- NULL = calcul impossible
+            detail     TEXT,               -- JSON libre (correspondances, distance…)
+            calcule_le TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -93,8 +120,8 @@ def inserer_annonce(conn: sqlite3.Connection, annonce: dict) -> None:
         INSERT OR IGNORE INTO annonces
             (source, titre, ville, prix, surface, pieces, url, score, cree_le,
              photos, score_etat, moisissure_detectee, points_negatifs, resume_etat,
-             nb_photos_analysees, photo_analyse_le)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             nb_photos_analysees, photo_analyse_le, code_postal, adresse, trajets, trajet_minutes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             annonce["source"],
@@ -114,8 +141,60 @@ def inserer_annonce(conn: sqlite3.Connection, annonce: dict) -> None:
             analyse.get("resume"),
             analyse.get("nb_photos_analysees"),
             _maintenant() if analyse else None,
+            annonce.get("code_postal"),
+            annonce.get("adresse"),
+            json.dumps(annonce.get("trajets"), ensure_ascii=False) if annonce.get("trajets") else None,
+            annonce.get("trajet_minutes"),
         ),
     )
+    conn.commit()
+
+
+def maj_trajets(conn: sqlite3.Connection, url: str, trajets: dict | None, trajet_minutes: float | None,
+                score: float | None = None) -> None:
+    conn.execute(
+        "UPDATE annonces SET trajets = ?, trajet_minutes = ?, score = COALESCE(?, score) WHERE url = ?",
+        (json.dumps(trajets, ensure_ascii=False) if trajets else None, trajet_minutes, score, url),
+    )
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Caches réseau
+# ---------------------------------------------------------------------------
+def geocodage_cache_get(conn: sqlite3.Connection, requete: str) -> dict | None:
+    row = conn.execute("SELECT lat, lon, libelle FROM geocodage WHERE requete = ?", (requete,)).fetchone()
+    if row is None:
+        return None
+    return {"lat": row["lat"], "lon": row["lon"], "libelle": row["libelle"]}
+
+
+def geocodage_cache_set(conn: sqlite3.Connection, requete: str, resultat: dict | None) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO geocodage (requete, lat, lon, libelle, calcule_le) VALUES (?, ?, ?, ?, ?)",
+        (requete, (resultat or {}).get("lat"), (resultat or {}).get("lon"),
+         (resultat or {}).get("libelle"), _maintenant()),
+    )
+    conn.commit()
+
+
+def trajet_cache_get(conn: sqlite3.Connection, cle: str) -> dict | None:
+    row = conn.execute("SELECT minutes, detail FROM trajets_cache WHERE cle = ?", (cle,)).fetchone()
+    if row is None:
+        return None
+    return {"minutes": row["minutes"], "detail": _charger_json(row["detail"], {})}
+
+
+def trajet_cache_set(conn: sqlite3.Connection, cle: str, minutes: float | None, detail: dict | None) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO trajets_cache (cle, minutes, detail, calcule_le) VALUES (?, ?, ?, ?)",
+        (cle, minutes, json.dumps(detail or {}, ensure_ascii=False), _maintenant()),
+    )
+    conn.commit()
+
+
+def vider_cache_trajets(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM trajets_cache")
     conn.commit()
 
 
@@ -189,6 +268,7 @@ def toutes_annonces(conn: sqlite3.Connection) -> list[dict]:
 def rechercher_annonces(conn: sqlite3.Connection, source: str | None = None, ville: str | None = None,
                         moisissure: bool | None = None, favoris: bool = False, masquees: bool = False,
                         q: str | None = None, score_min: float | None = None,
+                        trajet_max: float | None = None,
                         tri: str = "score", limite: int | None = None) -> list[dict]:
     conditions, params = [], []
     conditions.append("masquee = 1" if masquees else "masquee = 0")
@@ -208,6 +288,8 @@ def rechercher_annonces(conn: sqlite3.Connection, source: str | None = None, vil
         params.extend([motif, motif, motif])
     if score_min is not None:
         conditions.append("score >= ?"); params.append(score_min)
+    if trajet_max is not None:
+        conditions.append("trajet_minutes IS NOT NULL AND trajet_minutes <= ?"); params.append(trajet_max)
     sql = "SELECT * FROM annonces WHERE " + " AND ".join(conditions)
     sql += " ORDER BY " + TRIS.get(tri, TRIS["score"])
     if limite:
@@ -319,6 +401,10 @@ def _annonce_depuis_row(row: sqlite3.Row) -> dict:
         "favori": bool(row["favori"]) if "favori" in cles else False,
         "masquee": bool(row["masquee"]) if "masquee" in cles else False,
         "notes": row["notes"] if "notes" in cles else None,
+        "code_postal": row["code_postal"] if "code_postal" in cles else None,
+        "adresse": row["adresse"] if "adresse" in cles else None,
+        "trajets": _charger_json(row["trajets"], None) if "trajets" in cles else None,
+        "trajet_minutes": row["trajet_minutes"] if "trajet_minutes" in cles else None,
         "analyse_photo": None,
     }
     if row["photo_analyse_le"] is not None:

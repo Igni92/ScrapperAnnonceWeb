@@ -67,16 +67,17 @@ def _parser_ad(ad: dict) -> dict | None:
     prix = ad.get("price")
     if isinstance(prix, list):
         prix = prix[0] if prix else None
-    ville = (ad.get("location") or {}).get("city")
+    localisation = ad.get("location") or {}
     return base.normaliser_annonce(
         SOURCE,
         ad.get("subject"),
-        ville,
+        localisation.get("city"),
         prix,
         _attribut(ad, "square"),
         _attribut(ad, "rooms"),
         url,
         _photos_ad(ad),
+        code_postal=localisation.get("zipcode"),
     )
 
 

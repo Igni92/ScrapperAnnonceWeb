@@ -27,14 +27,25 @@ def score_surface(surface: float | None) -> float:
     return _interpoler(surface, config.SURFACE_MIN, config.SURFACE_MAX_REF, 0.0, 100.0)
 
 
-def score_trajet(ville: str | None) -> float:
-    minutes = config.TRAJET_MINUTES.get(ville, config.TRAJET_DEFAUT) if ville else config.TRAJET_DEFAUT
-    return _interpoler(minutes, 0, config.TRAJET_MAX_REF, 100.0, 0.0)
+def minutes_trajet(ville: str | None, trajet_minutes: float | None = None) -> float:
+    """Durée retenue pour la notation : trajet réel si connu, sinon table de secours par ville."""
+    if trajet_minutes is not None:
+        return float(trajet_minutes)
+    if ville and ville in config.TRAJET_MINUTES:
+        return float(config.TRAJET_MINUTES[ville])
+    return float(config.TRAJET_DEFAUT)
 
 
-def calculer_score(prix, surface, ville, score_etat=None, moisissure_detectee=False) -> float:
+def score_trajet(ville: str | None, trajet_minutes: float | None = None) -> float:
+    return _interpoler(minutes_trajet(ville, trajet_minutes), 0, config.TRAJET_MAX_REF, 100.0, 0.0)
+
+
+def calculer_score(prix, surface, ville, score_etat=None, moisissure_detectee=False,
+                   trajet_minutes=None) -> float:
     """Score global 0-100.
 
+    - `trajet_minutes` : durée réelle (pire destination) calculée par trajets.py ; None => table
+      de secours config.TRAJET_MINUTES.
     - `score_etat` : score 0-100 issu de l'analyse photo. None => score neutre
       (config.PHOTO_SCORE_NEUTRE) : une annonce sans photos n'est pas pénalisée.
     - `moisissure_detectee` : applique un malus fixe (MALUS_MOISISSURE) puis plafonne
@@ -44,7 +55,7 @@ def calculer_score(prix, surface, ville, score_etat=None, moisissure_detectee=Fa
     etat = config.PHOTO_SCORE_NEUTRE if score_etat is None else _borner(float(score_etat))
 
     score = (
-        config.POIDS_TRAJET * score_trajet(ville)
+        config.POIDS_TRAJET * score_trajet(ville, trajet_minutes)
         + config.POIDS_PRIX * score_prix(prix)
         + config.POIDS_SURFACE * score_surface(surface)
         + config.POIDS_PHOTO * etat
@@ -65,4 +76,5 @@ def calculer_score_annonce(annonce: dict) -> float:
         annonce.get("ville"),
         score_etat=analyse.get("score_etat"),
         moisissure_detectee=bool(analyse.get("moisissure_detectee")),
+        trajet_minutes=annonce.get("trajet_minutes"),
     )

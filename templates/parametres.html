@@ -11,7 +11,7 @@
     <legend>{{ section }}</legend>
     <div class="champs">
     {% for nom, type_, libelle, aide in champs %}
-      <div class="champ">
+      <div class="champ {{ 'large' if type_ == 'destinations' }}">
         <label for="{{ nom }}">{{ libelle }}</label>
         {% if type_ == 'int' %}
           <input type="number" step="1" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}" required>
@@ -25,6 +25,33 @@
           <div>{% for s in sources_disponibles %}
             <label style="display:inline-flex;gap:4px;font-weight:400;margin-right:12px"><input type="checkbox" name="{{ nom }}" value="{{ s }}" {{ 'checked' if s in valeurs[nom] }}> {{ s }}</label>
           {% endfor %}</div>
+        {% elif type_ == 'bool' %}
+          <label style="display:inline-flex;gap:6px;font-weight:400"><input type="checkbox" name="{{ nom }}" value="1" {{ 'checked' if valeurs[nom] }}> Oui</label>
+        {% elif type_ == 'destinations' %}
+          <table class="destinations" id="destinations">
+            <thead><tr><th>Nom</th><th>Adresse ou ville</th><th>Mode</th><th>Max (min)</th><th></th></tr></thead>
+            <tbody>
+            {% for d in valeurs[nom] %}
+              <tr>
+                <td><input type="text" name="DEST_nom" value="{{ d.nom }}" placeholder="Travail"></td>
+                <td><input type="text" name="DEST_adresse" value="{{ d.adresse }}" placeholder="12 rue Exemple, Rungis"></td>
+                <td><select name="DEST_mode">{% for m, lib in modes_trajet.items() %}<option value="{{ m }}" {{ 'selected' if d.mode == m }}>{{ lib }}</option>{% endfor %}</select></td>
+                <td><input type="number" name="DEST_max" min="1" value="{{ d.max_minutes if d.max_minutes is not none else '' }}" placeholder="30" style="width:80px"></td>
+                <td><button type="button" class="icone" title="Retirer" onclick="this.closest('tr').remove()">✕</button></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+          <button type="button" class="sec" style="margin-top:8px" onclick="ajouterDestination()">+ Ajouter une destination</button>
+          <template id="modele-destination">
+            <tr>
+              <td><input type="text" name="DEST_nom" placeholder="Travail"></td>
+              <td><input type="text" name="DEST_adresse" placeholder="12 rue Exemple, Rungis"></td>
+              <td><select name="DEST_mode">{% for m, lib in modes_trajet.items() %}<option value="{{ m }}">{{ lib }}</option>{% endfor %}</select></td>
+              <td><input type="number" name="DEST_max" min="1" placeholder="30" style="width:80px"></td>
+              <td><button type="button" class="icone" title="Retirer" onclick="this.closest('tr').remove()">✕</button></td>
+            </tr>
+          </template>
         {% elif type_.startswith('choix:') %}
           <select id="{{ nom }}" name="{{ nom }}">
             {% for c in type_.split(':')[1].split('|') %}<option value="{{ c }}" {{ 'selected' if valeurs[nom] == c }}>{{ c }}</option>{% endfor %}
@@ -44,6 +71,10 @@
 </form>
 
 <script>
+  function ajouterDestination() {
+    const tbody = document.querySelector("#destinations tbody");
+    tbody.appendChild(document.getElementById("modele-destination").content.cloneNode(true));
+  }
   const poids = document.querySelectorAll("[data-poids]"), somme = document.getElementById("somme-poids");
   function majSomme() {
     let total = 0; poids.forEach(p => total += parseFloat(p.value) || 0);

@@ -20,8 +20,34 @@ SURFACE_MIN = 30         # m²
 SURFACE_MAX_REF = 70     # surface à partir de laquelle le sous-score surface est à 100
 PIECES_MIN = 2
 
-# Temps de trajet estimé (minutes) par ville vers le lieu de travail.
-# Une ville absente de la table prend TRAJET_DEFAUT.
+# ---------------------------------------------------------------------------
+# Destinations et temps de trajet réels
+# ---------------------------------------------------------------------------
+# Chaque destination : nom, adresse (géocodée automatiquement), mode ("transport" ou "voiture")
+# et durée maximale en minutes (None = pas de filtre, sert seulement à la notation).
+# Le trajet est calculé depuis l'adresse (ou à défaut la ville + code postal) de chaque annonce.
+# Une annonce dépassant le maximum d'une destination est écartée.
+DESTINATIONS = [
+    {"nom": "Rungis", "adresse": "Rungis", "mode": "transport", "max_minutes": 30},
+]
+TRAJET_HEURE_DEPART = "08:30"    # heure de départ de référence (jour de semaine, heure de Paris)
+TRAJET_INCONNU_EXCLURE = False   # écarter les annonces dont le trajet n'a pas pu être calculé ?
+TRAJET_MAX_REF = 60              # trajet (min) à partir duquel le sous-score trajet est à 0
+
+# Services gratuits utilisés (aucune clé nécessaire), usage personnel et léger uniquement :
+#   géocodage : Base Adresse Nationale sur la Géoplateforme (data.geopf.fr)
+#   voiture   : OSRM, serveur de démonstration FOSSGIS (1 requête/s max, non commercial)
+#   transport : Transitous (api.transitous.org), projet bénévole : usage non commercial,
+#               léger, et User-Agent avec un contact (voir TRAJET_USER_AGENT)
+GEOCODAGE_URL = "https://data.geopf.fr/geocodage/search"
+OSRM_URL = "https://router.project-osrm.org"
+TRANSITOUS_URL = "https://api.transitous.org"
+TRAJET_USER_AGENT = "ScrapperAnnonceWeb/1.0 (+https://github.com/Igni92/ScrapperAnnonceWeb)"
+TRAJET_TIMEOUT = 30              # secondes par appel
+TRAJET_DELAI = 1.0               # pause entre deux appels réseau (politique OSRM : 1 req/s)
+
+# Secours si aucune destination n'est configurée ou si le calcul échoue :
+# temps de trajet estimé (minutes) par ville. Ville absente => TRAJET_DEFAUT.
 TRAJET_MINUTES = {
     "Paris": 20,
     "Montreuil": 30,
@@ -29,7 +55,6 @@ TRAJET_MINUTES = {
     "Saint-Mandé": 25,
 }
 TRAJET_DEFAUT = 45
-TRAJET_MAX_REF = 60      # trajet à partir duquel le sous-score trajet est à 0
 
 # ---------------------------------------------------------------------------
 # Pondération de la notation (somme = 1.0)
@@ -90,7 +115,8 @@ WEB_PORT = 5000
 
 # ---------------------------------------------------------------------------
 # Paramètres modifiables depuis l'interface web
-# (nom, type, section, libellé, aide). Types : int, float, str, liste, dict_int, choix:a|b
+# (nom, type, section, libellé, aide).
+# Types : int, float, str, bool, liste, dict_int, sources, destinations, choix:a|b
 # ---------------------------------------------------------------------------
 PARAMETRES = [
     ("VILLES", "liste", "Recherche", "Villes recherchées", "Séparées par des virgules."),
@@ -100,10 +126,14 @@ PARAMETRES = [
     ("PIECES_MIN", "int", "Recherche", "Nombre de pièces minimum", ""),
     ("PRIX_MIN_REF", "int", "Notation", "Loyer « idéal » (€)", "En dessous, le sous-score prix vaut 100."),
     ("SURFACE_MAX_REF", "int", "Notation", "Surface « idéale » (m²)", "Au-dessus, le sous-score surface vaut 100."),
-    ("TRAJET_MINUTES", "dict_int", "Notation", "Temps de trajet par ville (min)",
-     "Une ligne par ville : « Paris: 20 »."),
-    ("TRAJET_DEFAUT", "int", "Notation", "Trajet par défaut (min)", "Pour une ville absente de la table."),
-    ("TRAJET_MAX_REF", "int", "Notation", "Trajet maximal (min)", "À partir de cette durée, le sous-score trajet vaut 0."),
+    ("DESTINATIONS", "destinations", "Trajets", "Destinations",
+     "Temps de trajet réel calculé depuis chaque annonce. Une annonce au-delà du maximum est écartée."),
+    ("TRAJET_HEURE_DEPART", "str", "Trajets", "Heure de départ de référence", "Format HH:MM, jour de semaine."),
+    ("TRAJET_INCONNU_EXCLURE", "bool", "Trajets", "Écarter si trajet incalculable", "Sinon l'annonce est gardée avec un trajet inconnu."),
+    ("TRAJET_MAX_REF", "int", "Trajets", "Trajet maximal pour la notation (min)", "À partir de cette durée, le sous-score trajet vaut 0."),
+    ("TRAJET_MINUTES", "dict_int", "Trajets", "Secours : trajet estimé par ville (min)",
+     "Utilisé seulement sans destination ou si le calcul échoue. Une ligne par ville : « Paris: 20 »."),
+    ("TRAJET_DEFAUT", "int", "Trajets", "Secours : trajet par défaut (min)", "Pour une ville absente de la table."),
     ("POIDS_TRAJET", "float", "Pondération", "Poids du trajet", ""),
     ("POIDS_PRIX", "float", "Pondération", "Poids du prix", ""),
     ("POIDS_SURFACE", "float", "Pondération", "Poids de la surface", ""),

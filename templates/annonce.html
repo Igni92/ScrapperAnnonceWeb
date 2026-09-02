@@ -53,12 +53,43 @@
     </div>
 
     <div class="carte" style="margin-top:16px">
+      <h2 style="margin-top:0">Trajets</h2>
+      {% if a.trajets %}
+        <p class="sous">Depuis « {{ origine }} », départ un jour de semaine à l'heure de référence.</p>
+        <table>
+          <thead><tr><th>Destination</th><th>Mode</th><th class="num">Durée</th><th class="num">Max</th><th>Détail</th></tr></thead>
+          <tbody>
+          {% for nom, t in a.trajets.items() %}
+            {% set depasse = t.minutes is not none and t.max_minutes is not none and t.minutes > t.max_minutes %}
+            <tr>
+              <td>{{ nom }}</td>
+              <td>{{ modes.get(t.mode, t.mode) }}</td>
+              <td class="num trajet {{ 'ko' if depasse }}">{{ t.minutes|int ~ ' min' if t.minutes is not none else 'inconnu' }}</td>
+              <td class="num">{{ t.max_minutes ~ ' min' if t.max_minutes else '–' }}</td>
+              <td class="sous">
+                {% set d = t.detail or {} %}
+                {% if d.erreur %}{{ d.erreur }}{% endif %}
+                {% if d.correspondances is defined and d.correspondances is not none %}{{ d.correspondances }} correspondance(s){% endif %}
+                {% if d.lignes %} · {{ d.lignes|join(', ') }}{% endif %}
+                {% if d.distance_km %}{{ d.distance_km }} km{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="sous">Trajets non calculés (aucune destination configurée ou annonce antérieure). Lancez « Recalculer ».</p>
+      {% endif %}
+    </div>
+
+    <div class="carte" style="margin-top:16px">
       <h2 style="margin-top:0">Informations</h2>
       <dl class="infos">
         <dt>Loyer</dt><dd>{{ a.prix|euros }}</dd>
         <dt>Surface</dt><dd>{{ a.surface|int if a.surface else '?' }} m²</dd>
         <dt>Pièces</dt><dd>{{ a.pieces or '?' }}</dd>
-        <dt>Ville</dt><dd>{{ a.ville or '?' }} <span class="sous">(trajet estimé {{ trajet_minutes }} min)</span></dd>
+        <dt>Ville</dt><dd>{{ a.ville or '?' }} {{ a.code_postal or '' }} <span class="sous">({{ 'trajet retenu' if trajet_reel else 'trajet estimé' }} {{ trajet_minutes|int }} min)</span></dd>
+        {% if a.adresse %}<dt>Adresse</dt><dd>{{ a.adresse }}</dd>{% endif %}
         <dt>Ajoutée le</dt><dd>{{ a.cree_le|date_courte }}</dd>
         <dt>Lien</dt><dd><a href="{{ a.url }}" target="_blank" rel="noopener">Ouvrir sur {{ a.source }} ↗</a></dd>
       </dl>
