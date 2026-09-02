@@ -8,6 +8,7 @@ import json
 import logging
 from urllib.parse import urlencode, urljoin
 
+import config
 from . import base
 
 log = logging.getLogger(__name__)
@@ -32,11 +33,16 @@ def _json_ld_annonces(soup) -> list[dict]:
     return objets
 
 
+MOTIF_ANNONCE = r"/annonces/|/\d+\.htm$"
+
+
 def _parser_carte(carte) -> dict | None:
     lien = carte.select_one("a[href*='seloger.com'], a[data-testid*='card-mfe-covering-link'], a")
     if not lien or not lien.get("href"):
         return None
     url = urljoin(BASE_URL, lien["href"].split("?")[0])
+    if not base.est_url_annonce(url, "seloger.com", MOTIF_ANNONCE):
+        return None
     texte = carte.get_text(" ", strip=True)
 
     titre = (carte.select_one("[data-testid*='title'], h2, h3") or lien).get_text(" ", strip=True)
@@ -66,7 +72,7 @@ def _parser_carte(carte) -> dict | None:
 
 
 def _photos_detail(session, url: str) -> list[str]:
-    soup = base.get_html(session, url)
+    soup = base.get_html(session, url, delai=config.SCRAPER_DELAI_DETAIL)
     if soup is None:
         return []
     candidats: list[str] = []
@@ -108,8 +114,12 @@ def scraper(criteres: dict) -> list[dict]:
                 continue
             if not annonce["ville"]:
                 annonce["ville"] = ville
-            detail = _photos_detail(session, annonce["url"])
-            if detail:
-                annonce["photos"] = base.limiter_photos(detail + annonce["photos"])
             annonces.append(annonce)
     return annonces
+
+
+def completer(session, annonce: dict) -> None:
+    """Ouvre la page de l'annonce pour récupérer ses photos (nouvelles annonces seulement)."""
+    detail = _photos_detail(session, annonce["url"])
+    if detail:
+        annonce["photos"] = base.limiter_photos(detail + (annonce.get("photos") or []))

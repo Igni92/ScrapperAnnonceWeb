@@ -110,3 +110,7 @@ def scraper(criteres: dict) -> list[dict]:
                 annonce["ville"] = ville
             annonces.append(annonce)
     return annonces
+
+
+def completer(session, annonce: dict) -> None:
+    """Les photos sont déjà dans le JSON de la page de résultats : rien à faire."""

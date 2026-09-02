@@ -13,7 +13,8 @@ import db
 import photo_analysis
 import scoring
 import trajets
-from scrapers import SCRAPERS
+from scrapers import COMPLETEURS, SCRAPERS
+from scrapers import base as scrapers_base
 
 log = logging.getLogger("main")
 
@@ -31,8 +32,9 @@ MODES = {
 # ---------------------------------------------------------------------------
 def scraper_tout(sources: list[str]) -> list[dict]:
     villes = communes.villes_pour_scraping()
+    log.info("Villes recherchées : %s", ", ".join(villes))
     if len(villes) > len(config.VILLES):
-        log.info("Villes suggérées ajoutées au scraping : %s",
+        log.info("  dont villes suggérées ajoutées automatiquement : %s",
                  ", ".join(v for v in villes if v not in config.VILLES))
     criteres = {
         "villes": villes,
@@ -120,6 +122,23 @@ def calculer_trajets(conn, annonces: list[dict]) -> list[dict]:
             log.info("Écartée (trajet) : %s — %s", a.get("titre") or a["url"], trajets.resume_trajets(a["trajets"]))
     log.info("%d annonce(s) dans les temps de trajet, %d écartée(s)", len(gardees), len(annonces) - len(gardees))
     return gardees
+
+
+def completer_nouvelles(annonces: list[dict]) -> None:
+    """Ouvre la page de chaque nouvelle annonce retenue (photos…). Une session par site."""
+    if not annonces:
+        return
+    log.info("Récupération des photos de %d nouvelle(s) annonce(s)…", len(annonces))
+    sessions: dict[str, object] = {}
+    for a in annonces:
+        completer = COMPLETEURS.get(a["source"])
+        if completer is None:
+            continue
+        session = sessions.setdefault(a["source"], scrapers_base.session_http())
+        try:
+            completer(session, a)
+        except Exception:  # une page détail cassée ne doit pas bloquer le reste
+            log.exception("Complément impossible pour %s", a["url"])
 
 
 def dedupliquer(annonces: list[dict]) -> list[dict]:
@@ -228,8 +247,10 @@ def executer(mode: str, sources: list[str] | None = None, max_photos: int | None
         log.info("%d annonce(s) après filtrage (%d brutes, dont %d hors des villes recherchées), "
                  "%d nouvelle(s), %d déjà en base",
                  len(candidates), len(brutes), hors_ville, len(nouvelles), len(connues))
-        # Trajets uniquement pour les nouvelles annonces (les autres sont déjà en base, avec cache).
+        # Trajets uniquement pour les nouvelles annonces (les autres sont déjà en base, avec cache),
+        # puis pages détail (photos) uniquement pour celles retenues : le moins de requêtes possible.
         nouvelles = calculer_trajets(conn, nouvelles)
+        completer_nouvelles(nouvelles)
         resume.update(brutes=len(brutes), filtrees=len(candidates), nouvelles=len(nouvelles))
         if mode == "rapide":
             for a in nouvelles:

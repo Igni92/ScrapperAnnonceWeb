@@ -10,3 +10,11 @@ SCRAPERS = {
     "leboncoin": leboncoin.scraper,
     "seloger": seloger.scraper,
 }
+
+# Complément d'une annonce (page détail : photos…), appelé seulement pour les nouvelles annonces
+# retenues après filtrage, pour limiter les requêtes vers les sites.
+COMPLETEURS = {
+    "pap": pap.completer,
+    "leboncoin": leboncoin.completer,
+    "seloger": seloger.completer,
+}

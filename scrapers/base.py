@@ -26,27 +26,55 @@ def session_http() -> requests.Session:
     return s
 
 
-def get_html(session: requests.Session, url: str, **kwargs) -> BeautifulSoup | None:
-    try:
-        r = session.get(url, timeout=config.SCRAPER_TIMEOUT, **kwargs)
-        r.raise_for_status()
-    except requests.RequestException as exc:
-        log.warning("Échec GET %s : %s", url, exc)
-        return None
-    time.sleep(config.SCRAPER_DELAI)
-    return BeautifulSoup(r.text, "html.parser")
+def _get(session: requests.Session, url: str, delai: float, **kwargs) -> requests.Response | None:
+    """GET avec pause, et un nouvel essai après un 429 (trop de requêtes) ou une erreur 5xx."""
+    for essai in (1, 2):
+        try:
+            r = session.get(url, timeout=config.SCRAPER_TIMEOUT, **kwargs)
+            r.raise_for_status()
+            time.sleep(delai)
+            return r
+        except requests.HTTPError as exc:
+            code = exc.response.status_code if exc.response is not None else None
+            if essai == 1 and code == 429:
+                log.warning("Trop de requêtes vers %s : pause de %.0fs", url.split("/")[2], config.SCRAPER_ATTENTE_429)
+                time.sleep(config.SCRAPER_ATTENTE_429)
+                continue
+            if essai == 1 and code and code >= 500:
+                time.sleep(delai * 2)
+                continue
+            log.warning("Échec GET %s : %s", url, exc)
+            return None
+        except requests.RequestException as exc:
+            log.warning("Échec GET %s : %s", url, exc)
+            return None
+    return None
+
+
+def get_html(session: requests.Session, url: str, delai: float | None = None, **kwargs) -> BeautifulSoup | None:
+    r = _get(session, url, config.SCRAPER_DELAI if delai is None else delai, **kwargs)
+    return BeautifulSoup(r.text, "html.parser") if r is not None else None
 
 
 def get_json(session: requests.Session, url: str, **kwargs) -> dict | list | None:
-    try:
-        r = session.get(url, timeout=config.SCRAPER_TIMEOUT, **kwargs)
-        r.raise_for_status()
-        donnees = r.json()
-    except (requests.RequestException, ValueError) as exc:
-        log.warning("Échec GET JSON %s : %s", url, exc)
+    r = _get(session, url, config.SCRAPER_DELAI, **kwargs)
+    if r is None:
         return None
-    time.sleep(config.SCRAPER_DELAI)
-    return donnees
+    try:
+        return r.json()
+    except ValueError as exc:
+        log.warning("Réponse non JSON de %s : %s", url, exc)
+        return None
+
+
+def est_url_annonce(url: str, domaine: str, motif: str) -> bool:
+    """Vrai si l'URL est bien une page d'annonce du site (et pas un lien promotionnel ou externe)."""
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+    except ValueError:
+        return False
+    return p.netloc.endswith(domaine) and re.search(motif, p.path) is not None
 
 
 def nombre(texte) -> float | None:

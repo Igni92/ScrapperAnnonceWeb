@@ -4,6 +4,7 @@ import logging
 import re
 from urllib.parse import urljoin
 
+import config
 from . import base
 
 log = logging.getLogger(__name__)
@@ -52,11 +53,16 @@ def resoudre_geo(session, ville: str) -> tuple[str, str] | None:
     return resultat
 
 
+MOTIF_ANNONCE = r"^/annonces/[^/]+-r\d+$"
+
+
 def _parser_carte(carte, ville: str) -> dict | None:
     lien = carte.select_one("a.item-title, a[href*='/annonces/']")
     if not lien or not lien.get("href"):
         return None
-    url = urljoin(BASE_URL, lien["href"])
+    url = urljoin(BASE_URL, lien["href"]).split("?")[0]
+    if not base.est_url_annonce(url, "pap.fr", MOTIF_ANNONCE):
+        return None                       # bloc promotionnel, lien externe (acceslogement…)
     titre = lien.get_text(" ", strip=True)
 
     prix = base.nombre((carte.select_one(".item-price") or lien).get_text(" ", strip=True))
@@ -79,7 +85,7 @@ def _parser_carte(carte, ville: str) -> dict | None:
 
 
 def _photos_detail(session, url: str) -> list[str]:
-    soup = base.get_html(session, url)
+    soup = base.get_html(session, url, delai=config.SCRAPER_DELAI_DETAIL)
     if soup is None:
         return []
     candidats = []
@@ -109,10 +115,13 @@ def scraper(criteres: dict) -> list[dict]:
         log.info("PAP %s : %d résultats", ville, len(cartes))
         for carte in cartes:
             annonce = _parser_carte(carte, ville)
-            if annonce is None:
-                continue
-            detail = _photos_detail(session, annonce["url"])
-            if detail:
-                annonce["photos"] = base.limiter_photos(detail + annonce["photos"])
-            annonces.append(annonce)
+            if annonce is not None:
+                annonces.append(annonce)
     return annonces
+
+
+def completer(session, annonce: dict) -> None:
+    """Ouvre la page de l'annonce pour récupérer ses photos (appelé seulement pour les nouvelles annonces)."""
+    detail = _photos_detail(session, annonce["url"])
+    if detail:
+        annonce["photos"] = base.limiter_photos(detail + (annonce.get("photos") or []))

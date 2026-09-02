@@ -116,7 +116,9 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 SCRAPER_TIMEOUT = 20
-SCRAPER_DELAI = 1.5      # pause entre deux requêtes vers un même site
+SCRAPER_DELAI = 1.5          # pause entre deux requêtes vers un même site (pages de résultats)
+SCRAPER_DELAI_DETAIL = 3.0   # pause entre deux pages d'annonce (photos), plus sensibles au blocage
+SCRAPER_ATTENTE_429 = 20.0   # attente avant nouvel essai après un « 429 Too Many Requests »
 
 WEB_HOTE = "127.0.0.1"
 WEB_PORT = 5000
