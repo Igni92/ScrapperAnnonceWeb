@@ -20,19 +20,36 @@ non interactif, donc par votre abonnement Claude Code. Aucune clé API n'est né
 
 ## Lancer l'application
 
-Prérequis : Python 3.10+, et Claude Code installé et connecté à votre compte (`claude` doit
-fonctionner dans un terminal ; si ce n'est pas le cas, lancez `claude` une fois et connectez-vous).
+Prérequis : Claude Code installé et connecté à votre compte (la commande `claude` doit
+fonctionner dans un terminal ; sinon lancez `claude` une fois et connectez-vous).
+
+### Windows
+
+1. Installez Python depuis https://www.python.org/downloads/windows/ (bouton "Download Python 3.x").
+   Dans l'installeur, **cochez "Add python.exe to PATH"** avant de cliquer sur Install.
+   Fermez puis rouvrez l'invite de commandes après l'installation.
+2. Dans le dossier du projet, double-cliquez sur `lancer.bat` ou tapez :
+
+```bat
+cd ScrapperAnnonceWeb
+lancer.bat
+```
+
+Au premier lancement, le script crée l'environnement virtuel et installe les dépendances,
+puis exécute `main.py`. Les options se passent directement : `lancer.bat --skip-photos`.
+
+### Linux / macOS
 
 ```bash
 cd ScrapperAnnonceWeb
-python -m venv .venv
-source .venv/bin/activate          # Windows : .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
 python main.py                     # scraping + analyse photo des NOUVELLES annonces + classement
 ```
 
-Autres commandes utiles :
+Autres commandes utiles (sous Windows, remplacez `python main.py` par `lancer.bat`) :
 
 ```bash
 python main.py --skip-photos            # passage rapide (prix / trajet / surface), aucune analyse photo
