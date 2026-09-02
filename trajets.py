@@ -86,7 +86,9 @@ def geocoder(conn, requete: str, code_postal: str | None = None) -> dict | None:
     if features:
         f = features[0]
         lon, lat = f["geometry"]["coordinates"]
-        resultat = {"lat": lat, "lon": lon, "libelle": f.get("properties", {}).get("label", requete)}
+        props = f.get("properties", {})
+        resultat = {"lat": lat, "lon": lon, "libelle": props.get("label", requete),
+                    "code_postal": props.get("postcode"), "code_insee": props.get("citycode")}
     else:
         log.warning("Géocodage sans résultat pour « %s »", requete)
     db.geocodage_cache_set(conn, requete, resultat)

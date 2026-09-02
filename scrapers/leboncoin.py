@@ -1,8 +1,9 @@
 """Scraper Leboncoin — locations, via le JSON `__NEXT_DATA__` embarqué dans la page de résultats.
 
-Leboncoin est protégé par DataDome : si la page renvoie un 403, il faut passer par un proxy
-résidentiel ou une session navigateur (Playwright). Le parsing ci-dessous fonctionne dès
-que le HTML est obtenu.
+Leboncoin interdit et bloque l'accès automatisé (DataDome) : en accès direct, la page est
+refusée et votre adresse IP peut être restreinte. Préférez la source « alertes » (e-mails
+d'alerte). Ce module reste utilisable avec l'option navigateur (config.SOURCES_NAVIGATEUR),
+à vos risques.
 """
 
 import json
@@ -84,19 +85,42 @@ def _parser_ad(ad: dict) -> dict | None:
     )
 
 
+def _localisation(ville: str) -> str:
+    """Paramètre `locations` de Leboncoin : Ville_CP__lat_lon_rayon (géocodage BAN, avec cache)."""
+    try:
+        import db
+        import trajets
+        conn = db.init_db()
+        try:
+            geo = trajets.geocoder(conn, ville)
+        finally:
+            conn.close()
+    except Exception:
+        geo = None
+    if not geo:
+        return ville
+    cp = geo.get("code_postal") or ""
+    return f"{ville}_{cp}__{geo['lat']:.5f}_{geo['lon']:.5f}_3000"
+
+
 def scraper(criteres: dict) -> list[dict]:
+    if SOURCE not in config.SOURCES_NAVIGATEUR:
+        log.warning("Leboncoin bloque l'accès direct (protection anti-robot) : utilisez la source « alertes » "
+                    "(e-mails d'alerte). Source ignorée.")
+        return []
     session = base.session_http()
     annonces: list[dict] = []
     for ville in criteres.get("villes", []):
         params = {
             "category": "10",              # locations
             "real_estate_type": "1,2",     # maison, appartement
-            "text": ville,
+            "locations": _localisation(ville),
             "price": f"min-{int(criteres.get('prix_max', 99999))}",
             "rooms": f"{criteres.get('pieces_min', 1)}-max",
             "square": f"{int(criteres.get('surface_min', 0))}-max",
         }
-        soup = base.get_html(session, URL_RECHERCHE + "?" + urlencode(params))
+        soup = base.get_html_site(session, SOURCE, URL_RECHERCHE + "?" + urlencode(params),
+                                  attendre="script#__NEXT_DATA__")
         if soup is None:
             continue
         donnees = _next_data(soup)

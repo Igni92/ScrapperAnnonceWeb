@@ -56,6 +56,16 @@ def get_html(session: requests.Session, url: str, delai: float | None = None, **
     return BeautifulSoup(r.text, "html.parser") if r is not None else None
 
 
+def get_html_site(session: requests.Session, source: str, url: str, attendre: str | None = None,
+                  **kwargs) -> BeautifulSoup | None:
+    """HTML d'une page : via le navigateur piloté si la source est dans SOURCES_NAVIGATEUR, sinon requests."""
+    if source in config.SOURCES_NAVIGATEUR:
+        from . import navigateur
+        html = navigateur.charger(url, attendre=attendre)
+        return BeautifulSoup(html, "html.parser") if html else None
+    return get_html(session, url, **kwargs)
+
+
 def get_json(session: requests.Session, url: str, **kwargs) -> dict | list | None:
     r = _get(session, url, config.SCRAPER_DELAI, **kwargs)
     if r is None:

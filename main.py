@@ -131,6 +131,8 @@ def completer_nouvelles(annonces: list[dict]) -> None:
     log.info("Récupération des photos de %d nouvelle(s) annonce(s)…", len(annonces))
     sessions: dict[str, object] = {}
     for a in annonces:
+        if a.get("via") == "alerte":
+            continue                      # issue d'un e-mail : on ne contacte pas le site
         completer = COMPLETEURS.get(a["source"])
         if completer is None:
             continue

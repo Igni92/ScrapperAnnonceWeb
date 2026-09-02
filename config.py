@@ -16,7 +16,9 @@ VILLES = ["Rungis", "Chevilly-Larue", "L'Haÿ-les-Roses", "Thiais", "Fresnes", "
 # Écarter les annonces dont la ville n'est pas dans VILLES (ni dans les communes suggérées) :
 # les sites renvoient souvent des annonces des villes voisines.
 FILTRER_VILLES = True
-SOURCES_ACTIVES = ["pap", "leboncoin", "seloger"]
+# Sources : "pap" (scraping direct), "alertes" (e-mails d'alerte Leboncoin / SeLoger, recommandé),
+# "leboncoin" et "seloger" en accès direct sont bloqués par ces sites (voir SOURCES_NAVIGATEUR).
+SOURCES_ACTIVES = ["pap", "alertes"]
 # Carte interactive : départements dont les communes sont affichées et évaluées.
 CARTE_DEPARTEMENTS = ["75", "92", "93", "94"]
 # Ajouter automatiquement au scraping les communes qui respectent les temps de trajet
@@ -124,13 +126,28 @@ SCRAPER_DELAI = 1.5          # pause entre deux requêtes vers un même site (pa
 SCRAPER_DELAI_DETAIL = 3.0   # pause entre deux pages d'annonce (photos), plus sensibles au blocage
 SCRAPER_ATTENTE_429 = 20.0   # attente avant nouvel essai après un « 429 Too Many Requests »
 
+# Alertes e-mail (source "alertes") : l'application lit les e-mails d'alerte envoyés par
+# Leboncoin / SeLoger dans votre boîte, via IMAP. Avec Gmail : activez IMAP et créez un
+# « mot de passe d'application » (compte Google > Sécurité), à saisir ici, pas votre mot de passe.
+ALERTES_IMAP_HOTE = "imap.gmail.com"
+ALERTES_IMAP_UTILISATEUR = ""
+ALERTES_IMAP_MOT_DE_PASSE = ""
+ALERTES_DOSSIER = "INBOX"
+ALERTES_JOURS = 7                  # ne lire que les e-mails des N derniers jours
+ALERTES_EXPEDITEURS = ["leboncoin", "seloger"]
+
+# Navigateur piloté (Playwright) : option déconseillée, désactivée par défaut (voir navigateur.py).
+SOURCES_NAVIGATEUR = []
+NAVIGATEUR_VISIBLE = True          # fenêtre visible : c'est à vous de passer une vérification
+NAVIGATEUR_ATTENTE_CAPTCHA = 90    # secondes d'attente maximale devant une page de vérification
+
 WEB_HOTE = "127.0.0.1"
 WEB_PORT = 5000
 
 # ---------------------------------------------------------------------------
 # Paramètres modifiables depuis l'interface web
 # (nom, type, section, libellé, aide).
-# Types : int, float, str, bool, liste, villes, dict_int, sources, destinations, choix:a|b
+# Types : int, float, str, secret, bool, liste, villes, dict_int, sources, destinations, choix:a|b
 # ---------------------------------------------------------------------------
 PARAMETRES = [
     ("VILLES", "villes", "Recherche", "Villes recherchées",
@@ -141,7 +158,8 @@ PARAMETRES = [
      "Au scraping, ajoute les communes de la carte qui respectent les temps de trajet."),
     ("FILTRER_VILLES", "bool", "Recherche", "Écarter les annonces hors des villes recherchées",
      "Les sites renvoient souvent des annonces des villes voisines (ex. Paris pour Vincennes)."),
-    ("SOURCES_ACTIVES", "sources", "Recherche", "Sites à scraper", ""),
+    ("SOURCES_ACTIVES", "sources", "Recherche", "Sources",
+     "pap = site PAP ; alertes = e-mails d'alerte Leboncoin / SeLoger (recommandé pour ces deux sites)."),
     ("PRIX_MAX", "int", "Recherche", "Loyer maximum (€)", "Les annonces plus chères sont écartées."),
     ("SURFACE_MIN", "int", "Recherche", "Surface minimale (m²)", "Les annonces plus petites sont écartées."),
     ("PIECES_MIN", "int", "Recherche", "Nombre de pièces minimum", ""),
@@ -161,6 +179,13 @@ PARAMETRES = [
     ("POIDS_PHOTO", "float", "Pondération", "Poids de l'état (photos)", "La somme des quatre poids doit faire 1."),
     ("MALUS_MOISISSURE", "int", "Pondération", "Malus moisissure (points)", ""),
     ("PLAFOND_SCORE_MOISISSURE", "int", "Pondération", "Score maximum si moisissure", ""),
+    ("ALERTES_IMAP_HOTE", "str", "Alertes e-mail", "Serveur IMAP", "imap.gmail.com pour Gmail, outlook.office365.com pour Outlook."),
+    ("ALERTES_IMAP_UTILISATEUR", "str", "Alertes e-mail", "Adresse e-mail", ""),
+    ("ALERTES_IMAP_MOT_DE_PASSE", "secret", "Alertes e-mail", "Mot de passe d'application",
+     "Gmail : compte Google > Sécurité > Mots de passe des applications. Stocké en clair dans settings.json sur ce PC."),
+    ("ALERTES_DOSSIER", "str", "Alertes e-mail", "Dossier", "INBOX par défaut."),
+    ("ALERTES_JOURS", "int", "Alertes e-mail", "E-mails des N derniers jours", ""),
+    ("ALERTES_EXPEDITEURS", "liste", "Alertes e-mail", "Expéditeurs à lire", "Mots contenus dans l'adresse de l'expéditeur."),
     ("PHOTO_BACKEND", "choix:claude_code|api", "Analyse photo", "Moteur d'analyse",
      "claude_code = abonnement Claude Code (aucune clé API). api = clé ANTHROPIC_API_KEY, facturé à l'usage."),
     ("PHOTO_CLAUDE_MODEL", "choix:sonnet|opus", "Analyse photo", "Modèle (claude_code)", ""),

@@ -23,6 +23,8 @@
           <input type="number" step="0.01" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}" required {{ 'data-poids' if nom.startswith('POIDS_') }}>
         {% elif type_ == 'str' or type_ == 'liste' %}
           <input type="text" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}">
+        {% elif type_ == 'secret' %}
+          <input type="password" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}" autocomplete="off">
         {% elif type_ == 'villes' %}
           <input type="text" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}">
           {% if aide %}<div class="aide">{{ aide }}</div>{% endif %}
@@ -40,7 +42,7 @@
           <textarea id="{{ nom }}" name="{{ nom }}">{{ valeurs[nom] }}</textarea>
         {% elif type_ == 'sources' %}
           <div>{% for s in sources_disponibles %}
-            <label style="display:inline-flex;gap:4px;font-weight:400;margin-right:12px"><input type="checkbox" name="{{ nom }}" value="{{ s }}" {{ 'checked' if s in valeurs[nom] }}> {{ s }}</label>
+            <label style="display:inline-flex;gap:4px;font-weight:400;margin-right:12px" title="{{ 'Accès direct bloqué par le site (protection anti-robot) : préférez les alertes e-mail' if s in ('leboncoin', 'seloger') }}"><input type="checkbox" name="{{ nom }}" value="{{ s }}" {{ 'checked' if s in valeurs[nom] }}> {{ s }}{% if s in ('leboncoin', 'seloger') %} <span class="sous">(bloqué, déconseillé)</span>{% endif %}</label>
           {% endfor %}</div>
         {% elif type_ == 'bool' %}
           <label style="display:inline-flex;gap:6px;font-weight:400"><input type="checkbox" name="{{ nom }}" value="1" {{ 'checked' if valeurs[nom] }}> Oui</label>

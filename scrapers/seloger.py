@@ -1,7 +1,8 @@
 """Scraper SeLoger — locations, via les résultats HTML + JSON-LD des pages d'annonce.
 
-SeLoger applique aussi une protection anti-bot ; en cas de 403, même remarque que pour
-Leboncoin (proxy ou navigateur). Les sélecteurs ci-dessous sont à ajuster si le site change.
+SeLoger interdit et bloque l'accès automatisé (DataDome). Préférez la source « alertes »
+(e-mails d'alerte). Module utilisable avec l'option navigateur (config.SOURCES_NAVIGATEUR),
+à vos risques. Les sélecteurs sont à ajuster si le site change.
 """
 
 import json
@@ -65,7 +66,7 @@ def _parser_carte(carte) -> dict | None:
 
 
 def _photos_detail(session, url: str) -> list[str]:
-    soup = base.get_html(session, url, delai=config.SCRAPER_DELAI_DETAIL)
+    soup = base.get_html_site(session, SOURCE, url, delai=config.SCRAPER_DELAI_DETAIL)
     if soup is None:
         return []
     candidats: list[str] = []
@@ -82,6 +83,10 @@ def _photos_detail(session, url: str) -> list[str]:
 
 
 def scraper(criteres: dict) -> list[dict]:
+    if SOURCE not in config.SOURCES_NAVIGATEUR:
+        log.warning("SeLoger bloque l'accès direct (protection anti-robot) : utilisez la source « alertes » "
+                    "(e-mails d'alerte). Source ignorée.")
+        return []
     session = base.session_http()
     annonces: list[dict] = []
     for ville in criteres.get("villes", []):
@@ -96,7 +101,7 @@ def scraper(criteres: dict) -> list[dict]:
             "m": "search_refine",
             "searchText": ville,
         }
-        soup = base.get_html(session, URL_RECHERCHE + "?" + urlencode(params))
+        soup = base.get_html_site(session, SOURCE, URL_RECHERCHE + "?" + urlencode(params))
         if soup is None:
             continue
         cartes = soup.select("[data-testid='sl.explore.card-container'], div[class*='Card__Container'], article")

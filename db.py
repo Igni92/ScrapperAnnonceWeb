@@ -76,6 +76,10 @@ def init_db(db_path: str | None = None) -> sqlite3.Connection:
         )
         """
     )
+    colonnes_geo = {row["name"] for row in conn.execute("PRAGMA table_info(geocodage)")}
+    for nom in ("code_postal", "code_insee"):
+        if nom not in colonnes_geo:
+            conn.execute(f"ALTER TABLE geocodage ADD COLUMN {nom} TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS trajets_cache (
@@ -178,17 +182,21 @@ def maj_trajets(conn: sqlite3.Connection, url: str, trajets: dict | None, trajet
 # Caches réseau
 # ---------------------------------------------------------------------------
 def geocodage_cache_get(conn: sqlite3.Connection, requete: str) -> dict | None:
-    row = conn.execute("SELECT lat, lon, libelle FROM geocodage WHERE requete = ?", (requete,)).fetchone()
+    row = conn.execute("SELECT lat, lon, libelle, code_postal, code_insee FROM geocodage WHERE requete = ?",
+                       (requete,)).fetchone()
     if row is None:
         return None
-    return {"lat": row["lat"], "lon": row["lon"], "libelle": row["libelle"]}
+    return {"lat": row["lat"], "lon": row["lon"], "libelle": row["libelle"],
+            "code_postal": row["code_postal"], "code_insee": row["code_insee"]}
 
 
 def geocodage_cache_set(conn: sqlite3.Connection, requete: str, resultat: dict | None) -> None:
+    r = resultat or {}
     conn.execute(
-        "INSERT OR REPLACE INTO geocodage (requete, lat, lon, libelle, calcule_le) VALUES (?, ?, ?, ?, ?)",
-        (requete, (resultat or {}).get("lat"), (resultat or {}).get("lon"),
-         (resultat or {}).get("libelle"), _maintenant()),
+        """INSERT OR REPLACE INTO geocodage (requete, lat, lon, libelle, code_postal, code_insee, calcule_le)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (requete, r.get("lat"), r.get("lon"), r.get("libelle"), r.get("code_postal"), r.get("code_insee"),
+         _maintenant()),
     )
     conn.commit()
 

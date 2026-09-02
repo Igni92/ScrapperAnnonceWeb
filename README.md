@@ -34,6 +34,29 @@ python app.py            # interface web (ouvre le navigateur)
 python main.py           # ou version console : scraping + analyse + classement
 ```
 
+## Sources d'annonces
+
+| Source | Fonctionnement |
+|---|---|
+| `pap` | scraping direct du site PAP, avec délais et reprise après un « 429 » |
+| `alertes` | lecture de vos **e-mails d'alerte** Leboncoin / SeLoger (IMAP), recommandé pour ces deux sites |
+| `leboncoin`, `seloger` | accès direct **bloqué par ces sites** (protection anti-robot DataDome) : désactivés par défaut |
+
+Leboncoin et SeLoger interdisent l'accès automatisé et restreignent l'adresse IP qui insiste.
+Pour les couvrir sans risque :
+
+1. Sur chaque site, créez une alerte e-mail pour votre recherche (T2, villes, budget).
+2. Avec Gmail : activez IMAP et créez un *mot de passe d'application* (compte Google →
+   Sécurité → Validation en deux étapes → Mots de passe des applications).
+3. Dans **Paramètres → Alertes e-mail**, renseignez le serveur, votre adresse et ce mot de passe
+   (stocké en clair dans `settings.json`, sur votre PC uniquement).
+4. Cochez la source `alertes`. Chaque lancement lit les e-mails des derniers jours et en extrait
+   les annonces (titre, loyer, surface, ville, photo). Aucune requête n'est envoyée aux sites.
+
+L'option `SOURCES_NAVIGATEUR` (config.py) permet de charger Leboncoin / SeLoger dans un
+navigateur Chromium piloté par Playwright, fenêtre visible, sans camouflage. Elle est
+déconseillée et désactivée par défaut : ces sites peuvent restreindre votre accès.
+
 ## Interface web
 
 - **Annonces** : liste triable et filtrable (site, ville, moisissure, score minimum, favoris,

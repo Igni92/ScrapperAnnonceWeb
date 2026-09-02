@@ -174,7 +174,7 @@ def parser_formulaire(form) -> tuple[dict, list[str]]:
                 valeurs[nom] = int(float(brut))
             elif type_ == "float":
                 valeurs[nom] = float(brut)
-            elif type_ == "str":
+            elif type_ in ("str", "secret"):
                 valeurs[nom] = brut.strip()
             elif type_ in ("liste", "villes"):
                 valeurs[nom] = [v.strip() for v in brut.split(",") if v.strip()]
