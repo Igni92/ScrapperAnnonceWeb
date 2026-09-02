@@ -12,7 +12,7 @@ plupart des annonces d'une même ville partagent la même origine, donc très pe
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 
@@ -22,7 +22,18 @@ import db
 log = logging.getLogger(__name__)
 
 MODES = {"transport": "🚇 transports", "voiture": "🚗 voiture"}
-PARIS = ZoneInfo("Europe/Paris")
+
+
+def _fuseau_paris():
+    """Europe/Paris ; à défaut (Windows sans le paquet tzdata) le fuseau local de la machine."""
+    try:
+        return ZoneInfo("Europe/Paris")
+    except ZoneInfoNotFoundError:
+        log.warning("Fuseau Europe/Paris introuvable (installez le paquet tzdata) : fuseau local utilisé")
+        return datetime.now().astimezone().tzinfo
+
+
+PARIS = _fuseau_paris()
 _session: requests.Session | None = None
 
 
