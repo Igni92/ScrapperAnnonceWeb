@@ -38,9 +38,10 @@ def _client_par_titre():
 
 def _lancer(args, client, tmp_path):
     with patch.object(config, "DB_PATH", str(tmp_path / "t.db")), \
+         patch.object(config, "PHOTO_BACKEND", "api"), \
          patch.dict(main.SCRAPERS, {"pap": _faux_scraper}, clear=True), \
          patch.object(pa, "get_client", return_value=client), \
-         patch.object(pa, "telecharger_photo", return_value=("image/jpeg", "AAAA")), \
+         patch.object(pa, "telecharger_photo", return_value=("image/jpeg", b"AAAA")), \
          patch.object(pa.time, "sleep"):
         assert main.main(args) == 0
     return client

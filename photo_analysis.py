@@ -1,4 +1,9 @@
-"""Analyse de l'état d'un logement à partir des photos d'une annonce (API Anthropic, vision).
+"""Analyse de l'état d'un logement à partir des photos d'une annonce (vision).
+
+Deux backends, choisis par config.PHOTO_BACKEND :
+  - "claude_code" : le CLI `claude` en mode non interactif (`claude -p`), qui lit les photos
+                    téléchargées sur disque. Couvert par l'abonnement Claude Code : pas de clé API.
+  - "api"         : le SDK Anthropic (facturé à l'usage, clé ANTHROPIC_API_KEY).
 
 Point d'entrée principal : `analyser_annonces(annonces)` qui remplit `annonce["analyse_photo"]`
 pour chaque annonce, avec un dict de la forme :
@@ -19,10 +24,14 @@ ne fait que l'analyse elle-même.
 import base64
 import json
 import logging
+import re
+import shutil
+import subprocess
+import tempfile
 import time
+from pathlib import Path
 from typing import Callable
 
-import anthropic
 import requests
 
 import config
@@ -30,6 +39,7 @@ import config
 log = logging.getLogger(__name__)
 
 MEDIA_TYPES_ACCEPTES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+EXTENSIONS = {"image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp"}
 
 SCHEMA_REPONSE = {
     "type": "object",
@@ -79,6 +89,10 @@ PROMPT_SYSTEME = (
 )
 
 
+class LimiteDebit(Exception):
+    """Limite de débit / quota atteint : le lot doit marquer une pause puis réessayer."""
+
+
 # ---------------------------------------------------------------------------
 # Résultats
 # ---------------------------------------------------------------------------
@@ -95,7 +109,7 @@ def resultat_neutre(raison: str, nb_photos: int = 0) -> dict:
 
 
 def _resultat_erreur(raison: str, nb_photos: int = 0) -> dict:
-    """Erreur technique : on renvoie un score neutre mais statut 'erreur' pour ne pas le mettre en cache."""
+    """Erreur technique : score neutre mais statut 'erreur' pour ne pas le mettre en cache."""
     resultat = resultat_neutre(raison, nb_photos)
     resultat["statut"] = "erreur"
     return resultat
@@ -104,8 +118,8 @@ def _resultat_erreur(raison: str, nb_photos: int = 0) -> dict:
 # ---------------------------------------------------------------------------
 # Téléchargement des photos
 # ---------------------------------------------------------------------------
-def telecharger_photo(url: str, session: requests.Session | None = None) -> tuple[str, str] | None:
-    """Télécharge une image et la renvoie encodée (media_type, base64), ou None si inutilisable."""
+def telecharger_photo(url: str, session: requests.Session | None = None) -> tuple[str, bytes] | None:
+    """Télécharge une image et renvoie (media_type, octets), ou None si inutilisable."""
     session = session or requests.Session()
     try:
         reponse = session.get(
@@ -135,47 +149,34 @@ def telecharger_photo(url: str, session: requests.Session | None = None) -> tupl
             return None
     if not contenu:
         return None
+    return media_type, bytes(contenu)
 
-    return media_type, base64.standard_b64encode(bytes(contenu)).decode("ascii")
 
-
-def preparer_blocs_images(photos: list[str], max_photos: int | None = None,
-                          session: requests.Session | None = None) -> list[dict]:
-    """Télécharge jusqu'à `max_photos` photos et construit les blocs `image` pour l'API."""
+def telecharger_photos(photos: list[str], max_photos: int | None = None,
+                       session: requests.Session | None = None) -> list[tuple[str, bytes]]:
+    """Télécharge jusqu'à `max_photos` photos exploitables."""
     max_photos = max_photos or config.MAX_PHOTOS_PAR_ANNONCE
     session = session or requests.Session()
-    blocs: list[dict] = []
+    images: list[tuple[str, bytes]] = []
     for url in photos:
-        if len(blocs) >= max_photos:
+        if len(images) >= max_photos:
             break
         image = telecharger_photo(url, session)
-        if image is None:
-            continue
-        media_type, donnees = image
-        blocs.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": donnees},
-        })
-    return blocs
+        if image is not None:
+            images.append(image)
+    return images
 
 
-# ---------------------------------------------------------------------------
-# Appel du modèle
-# ---------------------------------------------------------------------------
-_client: anthropic.Anthropic | None = None
+def _texte_requete(titre: str, nb: int) -> str:
+    intro = f"Annonce : « {titre} ». " if titre else ""
+    return (f"{intro}Voici {nb} photo(s) de ce logement. Évalue son état selon les consignes "
+            "et renvoie uniquement le JSON.")
 
 
-def get_client() -> anthropic.Anthropic:
-    """Client Anthropic partagé (clé lue depuis ANTHROPIC_API_KEY ou un profil `ant auth login`)."""
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic()
-    return _client
-
-
-def _parser_reponse(texte: str) -> dict:
-    """Parse la réponse JSON du modèle et normalise les types."""
-    donnees = json.loads(texte)
+def _parser_reponse(donnees) -> dict:
+    """Normalise le JSON du modèle (dict déjà parsé ou texte)."""
+    if isinstance(donnees, str):
+        donnees = json.loads(donnees)
     score = int(round(float(donnees["score_etat"])))
     return {
         "score_etat": max(0, min(100, score)),
@@ -185,26 +186,112 @@ def _parser_reponse(texte: str) -> dict:
     }
 
 
-def analyser_photos(photos: list[str], titre: str = "", client: anthropic.Anthropic | None = None,
-                    max_photos: int | None = None, session: requests.Session | None = None) -> dict:
-    """Analyse les photos d'une annonce et renvoie le dict de résultat (voir en-tête du module)."""
-    photos = [p for p in (photos or []) if p]
-    if len(photos) < config.PHOTO_MIN_POUR_ANALYSE:
-        return resultat_neutre("pas assez de photos dans l'annonce", nb_photos=0)
+# ---------------------------------------------------------------------------
+# Backend "claude_code" : CLI `claude -p` (abonnement Claude Code)
+# ---------------------------------------------------------------------------
+def cli_disponible() -> bool:
+    return shutil.which(config.PHOTO_CLAUDE_CLI) is not None
 
-    blocs = preparer_blocs_images(photos, max_photos=max_photos, session=session)
-    if len(blocs) < config.PHOTO_MIN_POUR_ANALYSE:
-        return resultat_neutre("photos non téléchargeables", nb_photos=len(blocs))
 
-    contenu = list(blocs)
-    intro = f"Annonce : « {titre} ». " if titre else ""
-    contenu.append({
-        "type": "text",
-        "text": (
-            f"{intro}Voici {len(blocs)} photo(s) de ce logement. Évalue son état selon les "
-            "consignes et renvoie uniquement le JSON."
-        ),
-    })
+def _analyser_via_claude_code(images: list[tuple[str, bytes]], titre: str) -> dict:
+    with tempfile.TemporaryDirectory(prefix="photos_annonce_") as dossier:
+        chemins = []
+        for i, (media_type, octets) in enumerate(images, start=1):
+            chemin = Path(dossier) / f"photo_{i}{EXTENSIONS[media_type]}"
+            chemin.write_bytes(octets)
+            chemins.append(str(chemin))
+
+        liste = "\n".join(f"- {c}" for c in chemins)
+        prompt = (f"{_texte_requete(titre, len(chemins))}\n\n"
+                  f"Lis chacune de ces images avec l'outil Read avant de répondre :\n{liste}")
+        commande = [
+            config.PHOTO_CLAUDE_CLI, "-p", prompt,
+            "--model", config.PHOTO_CLAUDE_MODEL,
+            "--append-system-prompt", PROMPT_SYSTEME,
+            "--output-format", "json",
+            "--json-schema", json.dumps(SCHEMA_REPONSE, ensure_ascii=False),
+            "--tools", "Read",
+            "--allowedTools", "Read",
+            "--no-session-persistence",
+        ]
+        try:
+            proc = subprocess.run(
+                commande, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                timeout=config.PHOTO_CLAUDE_TIMEOUT, cwd=dossier,
+            )
+        except FileNotFoundError:
+            log.error("CLI `%s` introuvable : installez Claude Code ou passez PHOTO_BACKEND='api'",
+                      config.PHOTO_CLAUDE_CLI)
+            return _resultat_erreur("CLI claude introuvable", len(images))
+        except subprocess.TimeoutExpired:
+            log.error("`claude -p` a dépassé %ds", config.PHOTO_CLAUDE_TIMEOUT)
+            return _resultat_erreur("délai dépassé", len(images))
+
+    sortie = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not sortie:
+        detail = (proc.stderr or sortie or "").strip()[-400:]
+        if re.search(r"rate limit|usage limit|limit reached|429", detail, re.I):
+            raise LimiteDebit(detail)
+        log.error("`claude -p` a échoué (code %s) : %s", proc.returncode, detail)
+        return _resultat_erreur("échec du CLI claude", len(images))
+
+    try:
+        enveloppe = json.loads(sortie)
+    except ValueError:
+        log.error("Sortie de `claude -p` non JSON : %r", sortie[:200])
+        return _resultat_erreur("sortie CLI non parsable", len(images))
+
+    if enveloppe.get("is_error"):
+        detail = str(enveloppe.get("result") or "")[:400]
+        if re.search(r"rate limit|usage limit|limit reached|429", detail, re.I):
+            raise LimiteDebit(detail)
+        log.error("`claude -p` a renvoyé une erreur : %s", detail)
+        return _resultat_erreur("erreur renvoyée par le CLI", len(images))
+
+    brut = enveloppe.get("structured_output")
+    if brut is None:
+        brut = _extraire_json(str(enveloppe.get("result") or ""))
+    try:
+        resultat = _parser_reponse(brut)
+    except (ValueError, KeyError, TypeError) as exc:
+        log.error("Réponse JSON invalide (%s) : %r", exc, str(brut)[:200])
+        return _resultat_erreur("réponse du modèle non parsable", len(images))
+    resultat["nb_photos_analysees"] = len(images)
+    resultat["statut"] = "ok"
+    return resultat
+
+
+def _extraire_json(texte: str):
+    """Tolère un JSON entouré de texte ou de ``` : renvoie le premier objet {...} trouvé."""
+    m = re.search(r"\{.*\}", texte, re.S)
+    return m.group(0) if m else texte
+
+
+# ---------------------------------------------------------------------------
+# Backend "api" : SDK Anthropic (facturé à l'usage)
+# ---------------------------------------------------------------------------
+_client = None
+
+
+def get_client():
+    """Client Anthropic partagé (clé lue depuis ANTHROPIC_API_KEY)."""
+    global _client
+    if _client is None:
+        import anthropic  # import différé : inutile avec le backend claude_code
+        _client = anthropic.Anthropic()
+    return _client
+
+
+def _analyser_via_api(images: list[tuple[str, bytes]], titre: str, client=None) -> dict:
+    import anthropic
+
+    contenu = [
+        {"type": "image",
+         "source": {"type": "base64", "media_type": media_type,
+                    "data": base64.standard_b64encode(octets).decode("ascii")}}
+        for media_type, octets in images
+    ]
+    contenu.append({"type": "text", "text": _texte_requete(titre, len(images))})
 
     client = client or get_client()
     try:
@@ -215,43 +302,64 @@ def analyser_photos(photos: list[str], titre: str = "", client: anthropic.Anthro
             messages=[{"role": "user", "content": contenu}],
             output_config={"format": {"type": "json_schema", "schema": SCHEMA_REPONSE}},
         )
-    except anthropic.RateLimitError:
-        # Le SDK a déjà retenté avec backoff : on lève pour que le batch marque une pause.
-        raise
+    except anthropic.RateLimitError as exc:
+        # Le SDK a déjà retenté avec backoff : on lève pour que le lot marque une pause.
+        raise LimiteDebit(str(exc)) from exc
     except anthropic.BadRequestError as exc:
         # Typiquement : image trop grande / dimensions hors limites. Pas de cache, on réessaiera.
         log.error("Requête refusée par l'API (%s) : %s", exc.status_code, exc.message)
-        return _resultat_erreur("requête refusée par l'API", nb_photos=len(blocs))
+        return _resultat_erreur("requête refusée par l'API", len(images))
     except anthropic.APIStatusError as exc:
         log.error("Erreur API %s : %s", exc.status_code, exc.message)
-        return _resultat_erreur(f"erreur API {exc.status_code}", nb_photos=len(blocs))
+        return _resultat_erreur(f"erreur API {exc.status_code}", len(images))
     except anthropic.APIConnectionError as exc:
         log.error("Connexion à l'API impossible : %s", exc)
-        return _resultat_erreur("connexion API impossible", nb_photos=len(blocs))
+        return _resultat_erreur("connexion API impossible", len(images))
 
     if reponse.stop_reason == "refusal":
         log.warning("Le modèle a refusé d'analyser les photos de « %s »", titre)
-        return resultat_neutre("analyse refusée par le modèle", nb_photos=len(blocs))
+        return resultat_neutre("analyse refusée par le modèle", len(images))
     if reponse.stop_reason == "max_tokens":
-        return _resultat_erreur("réponse tronquée", nb_photos=len(blocs))
+        return _resultat_erreur("réponse tronquée", len(images))
 
     texte = next((b.text for b in reponse.content if b.type == "text"), "")
     try:
         resultat = _parser_reponse(texte)
     except (ValueError, KeyError, TypeError) as exc:
         log.error("Réponse JSON invalide (%s) : %r", exc, texte[:200])
-        return _resultat_erreur("réponse du modèle non parsable", nb_photos=len(blocs))
-
-    resultat["nb_photos_analysees"] = len(blocs)
+        return _resultat_erreur("réponse du modèle non parsable", len(images))
+    resultat["nb_photos_analysees"] = len(images)
     resultat["statut"] = "ok"
     return resultat
 
 
 # ---------------------------------------------------------------------------
+# Point d'entrée par annonce
+# ---------------------------------------------------------------------------
+def analyser_photos(photos: list[str], titre: str = "", client=None,
+                    max_photos: int | None = None, session: requests.Session | None = None,
+                    backend: str | None = None) -> dict:
+    """Analyse les photos d'une annonce et renvoie le dict de résultat (voir en-tête du module)."""
+    photos = [p for p in (photos or []) if p]
+    if len(photos) < config.PHOTO_MIN_POUR_ANALYSE:
+        return resultat_neutre("pas assez de photos dans l'annonce", nb_photos=0)
+
+    images = telecharger_photos(photos, max_photos=max_photos, session=session)
+    if len(images) < config.PHOTO_MIN_POUR_ANALYSE:
+        return resultat_neutre("photos non téléchargeables", nb_photos=len(images))
+
+    backend = backend or config.PHOTO_BACKEND
+    if backend == "api":
+        return _analyser_via_api(images, titre, client=client)
+    if backend == "claude_code":
+        return _analyser_via_claude_code(images, titre)
+    raise ValueError(f"PHOTO_BACKEND inconnu : {backend!r} (attendu 'claude_code' ou 'api')")
+
+
+# ---------------------------------------------------------------------------
 # Traitement par lots avec throttling
 # ---------------------------------------------------------------------------
-def analyser_annonces(annonces: list[dict], client: anthropic.Anthropic | None = None,
-                      max_photos: int | None = None,
+def analyser_annonces(annonces: list[dict], client=None, max_photos: int | None = None,
                       apres_chaque: Callable[[dict], None] | None = None,
                       max_par_run: int | None = None) -> list[dict]:
     """Analyse les photos d'une liste d'annonces, par lots, avec pause entre les appels.
@@ -269,7 +377,8 @@ def analyser_annonces(annonces: list[dict], client: anthropic.Anthropic | None =
         log.warning("%d annonces à analyser, limité à %d pour ce run (PHOTO_MAX_PAR_RUN)",
                     len(annonces), len(a_traiter))
 
-    client = client or get_client()
+    if config.PHOTO_BACKEND == "api" and client is None:
+        client = get_client()
     session = requests.Session()
     total = len(a_traiter)
     taille_lot = max(1, config.PHOTO_TAILLE_LOT)
@@ -303,11 +412,12 @@ def _analyser_avec_reprise(annonce: dict, client, max_photos, session, essais: i
                 max_photos=max_photos,
                 session=session,
             )
-        except anthropic.RateLimitError:
+        except LimiteDebit as exc:
             if essai == essais:
-                log.error("Limite de débit persistante, annonce laissée non analysée : %s", annonce["url"])
-                return _resultat_erreur("limite de débit API")
+                log.error("Limite de débit persistante, annonce laissée non analysée : %s (%s)",
+                          annonce["url"], str(exc)[:120])
+                return _resultat_erreur("limite de débit")
             log.warning("Limite de débit atteinte, nouvelle tentative dans %.0fs", attente)
             time.sleep(attente)
             attente *= 2
-    return _resultat_erreur("limite de débit API")
+    return _resultat_erreur("limite de débit")

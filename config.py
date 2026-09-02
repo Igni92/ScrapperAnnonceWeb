@@ -34,7 +34,18 @@ POIDS_PHOTO = 0.15
 # ---------------------------------------------------------------------------
 # Analyse photo (vision)
 # ---------------------------------------------------------------------------
-# Modèle avec vision. Alternatives : "claude-sonnet-5" (moins cher), "claude-opus-5" (plus précis).
+# Backend d'analyse :
+#   "claude_code" : passe par le CLI `claude` en mode non interactif (claude -p). Couvert par
+#                   l'abonnement Claude Code, aucune clé API ni facturation à l'usage.
+#   "api"         : SDK Anthropic (ANTHROPIC_API_KEY), facturé à l'usage, indépendant de l'abonnement.
+PHOTO_BACKEND = "claude_code"
+
+# Backend claude_code : exécutable et alias de modèle passés à `claude -p --model`.
+PHOTO_CLAUDE_CLI = "claude"
+PHOTO_CLAUDE_MODEL = "sonnet"          # "sonnet" (rapide) ou "opus" (plus précis, consomme plus de quota)
+PHOTO_CLAUDE_TIMEOUT = 240             # secondes max par annonce
+
+# Backend api : modèle avec vision. Alternatives : "claude-sonnet-5", "claude-opus-5".
 PHOTO_MODEL = "claude-sonnet-4-6"
 MAX_PHOTOS_PAR_ANNONCE = 6       # 5-6 photos max pour limiter coût et temps
 PHOTO_MIN_POUR_ANALYSE = 2       # en dessous, on ne juge pas : score neutre
