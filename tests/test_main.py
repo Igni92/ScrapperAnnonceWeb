@@ -42,6 +42,7 @@ def _lancer(args, client, tmp_path):
          patch.object(config, "DESTINATIONS", []), \
          patch.object(config, "VILLES", ["Paris"]), \
          patch.dict(main.SCRAPERS, {"pap": _faux_scraper}, clear=True), \
+         patch.dict(main.COMPLETEURS, {}, clear=True), \
          patch.object(pa, "get_client", return_value=client), \
          patch.object(pa, "telecharger_photo", return_value=("image/jpeg", b"AAAA")), \
          patch.object(pa.time, "sleep"):
@@ -100,6 +101,7 @@ def test_pipeline_ecarte_les_trajets_trop_longs(tmp_path):
          patch.object(config, "VILLES", ["Paris"]), \
          patch.object(config, "DESTINATIONS", [{"nom": "Rungis", "adresse": "Rungis", "mode": "transport", "max_minutes": 30}]), \
          patch.dict(main.SCRAPERS, {"pap": _faux_scraper}, clear=True), \
+         patch.dict(main.COMPLETEURS, {}, clear=True), \
          patch.object(trajets, "calculer_trajets", side_effect=faux_calcul):
         assert main.main(["--sources", "pap", "--skip-photos"]) == 0
         conn = db.init_db(str(tmp_path / "t.db"))
