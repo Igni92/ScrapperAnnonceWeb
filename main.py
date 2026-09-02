@@ -195,13 +195,24 @@ def recalculer_scores(conn) -> int:
     annonces = db.toutes_annonces(conn)
     if config.DESTINATIONS:
         log.info("Recalcul des trajets vers %s…", ", ".join(d["nom"] for d in config.DESTINATIONS))
+    corrigees = 0
     for a in annonces:
+        # Valeurs implausibles lues par une ancienne version du scraper : remplacées par « inconnu ».
+        prix_ok = a["prix"] is None or a["prix"] >= config.PRIX_MIN_PLAUSIBLE
+        surface_ok = a["surface"] is None or a["surface"] >= config.SURFACE_MIN_PLAUSIBLE
+        if not (prix_ok and surface_ok):
+            a["prix"] = a["prix"] if prix_ok else None
+            a["surface"] = a["surface"] if surface_ok else None
+            db.maj_caracteristiques(conn, a["url"], a["prix"], a["surface"])
+            corrigees += 1
         if config.DESTINATIONS:
             trajets.calculer_trajets(conn, a)
         else:
             a["trajets"], a["trajet_minutes"] = None, None
         score = scoring.calculer_score_annonce(a)
         db.maj_trajets(conn, a["url"], a["trajets"], a["trajet_minutes"], score=score)
+    if corrigees:
+        log.info("%d annonce(s) avec loyer ou surface implausible passé(e)s en « inconnu »", corrigees)
     log.info("%d score(s) recalculé(s)", len(annonces))
     return len(annonces)
 

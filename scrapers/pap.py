@@ -65,14 +65,14 @@ def _parser_carte(carte, ville: str) -> dict | None:
         return None                       # bloc promotionnel, lien externe (acceslogement…)
     titre = lien.get_text(" ", strip=True)
 
-    prix = base.nombre((carte.select_one(".item-price") or lien).get_text(" ", strip=True))
-    surface = pieces = None
-    for tag in carte.select(".item-tags li, .item-tags span"):
-        texte = tag.get_text(" ", strip=True)
-        if "m²" in texte or "m2" in texte:
-            surface = base.nombre(texte)
-        elif "pièce" in texte:
-            pieces = base.entier(texte)
+    texte_carte = carte.get_text(" ", strip=True)
+    prix_el = carte.select_one(".item-price, [class*='price']")
+    prix = base.extraire_prix(prix_el.get_text(" ", strip=True) if prix_el else None) \
+        or base.extraire_prix(texte_carte)
+    tags_el = carte.select_one(".item-tags")
+    texte_tags = tags_el.get_text(" ", strip=True) if tags_el else ""
+    surface = base.extraire_surface(texte_tags) or base.extraire_surface(texte_carte)
+    pieces = base.extraire_pieces(texte_tags) or base.extraire_pieces(titre) or base.extraire_pieces(texte_carte)
 
     # Localisation affichée (ex. « Paris 12e (75012) ») : plus précise que la ville recherchée.
     loc = carte.select_one(".item-description strong, .item-location, [class*='location']")

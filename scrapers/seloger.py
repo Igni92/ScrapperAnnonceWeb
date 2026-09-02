@@ -47,15 +47,10 @@ def _parser_carte(carte) -> dict | None:
 
     titre = (carte.select_one("[data-testid*='title'], h2, h3") or lien).get_text(" ", strip=True)
     prix_el = carte.select_one("[data-testid*='price'], .price, [class*='Price']")
-    prix = base.nombre(prix_el.get_text(" ", strip=True)) if prix_el else None
-
-    surface = pieces = None
-    for tag in carte.select("li, [data-testid*='tag'], [class*='Tag']"):
-        t = tag.get_text(" ", strip=True)
-        if "m²" in t:
-            surface = base.nombre(t)
-        elif "p" in t and ("pièce" in t or t.strip().endswith("p")):
-            pieces = base.entier(t)
+    prix = base.extraire_prix(prix_el.get_text(" ", strip=True) if prix_el else None) \
+        or base.extraire_prix(texte)
+    surface = base.extraire_surface(texte)
+    pieces = base.extraire_pieces(texte) or base.extraire_pieces(titre)
 
     ville_el = carte.select_one("[data-testid*='address'], [class*='Address'], address")
     localisation = ville_el.get_text(" ", strip=True) if ville_el else ""
@@ -65,8 +60,6 @@ def _parser_carte(carte) -> dict | None:
         adresse, ville = [p.strip() for p in localisation.rsplit(",", 1)]
 
     photos = [img.get("data-src") or img.get("src") for img in carte.select("img")]
-    if prix is None and "€" in texte:
-        prix = base.nombre(texte.split("€")[0][-12:])
     return base.normaliser_annonce(SOURCE, titre, ville, prix, surface, pieces, url, photos,
                                    code_postal=base.code_postal_dans(localisation), adresse=adresse)
 

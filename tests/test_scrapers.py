@@ -86,3 +86,38 @@ def test_completion_seulement_pour_les_nouvelles(tmp_path):
     conn = db.init_db(str(tmp_path / "t.db"))
     nouvelle = next(a for a in db.lister_annonces(conn) if a["url"].endswith("b-r2"))
     assert nouvelle["photos"] == ["https://ex.com/p.jpg"]
+
+
+def test_extraction_prix_surface_pieces():
+    assert base.extraire_prix("1 250 € / mois") == 1250      # espace insécable étroite (PAP)
+    assert base.extraire_prix("1 250 €") == 1250 and base.extraire_prix("950€") == 950
+    assert base.extraire_prix("Appartement 1 pièce 25 m²") is None   # pas de montant en euros
+    assert base.extraire_prix("1 €") is None                          # implausible
+    assert base.extraire_surface("T2 de 45,5 m² lumineux") == 45.5
+    assert base.extraire_surface("38 m2") == 38 and base.extraire_surface("5 m²") is None
+    assert base.extraire_pieces("2 pièces 38 m²") == 2 and base.extraire_pieces("T3 lumineux") == 3
+    assert base.extraire_pieces("3 p. 60 m²") == 3 and base.extraire_pieces("Studio") is None
+    a = base.normaliser_annonce("pap", "T2", "Rungis", "1 €", "5 m²", "2", "u", [])
+    assert a["prix"] is None and a["surface"] is None
+
+
+def test_pap_prix_avec_espace_insecable():
+    from bs4 import BeautifulSoup
+    html = ('<div class="search-list-item"><a class="item-title" href="/annonces/appartement-rungis-94150-r1">'
+            'Appartement 1 pièce</a><span class="item-price">1 250 €</span>'
+            '<ul class="item-tags"><li>2 pièces</li><li>40,5 m²</li></ul></div>')
+    carte = BeautifulSoup(html, "html.parser").select_one("div.search-list-item")
+    a = pap._parser_carte(carte, "Rungis")
+    assert a["prix"] == 1250 and a["surface"] == 40.5 and a["pieces"] == 2
+
+
+def test_recalculer_corrige_les_valeurs_implausibles(tmp_path):
+    import db
+    import main
+    with patch.object(config, "DB_PATH", str(tmp_path / "t.db")), patch.object(config, "DESTINATIONS", []):
+        conn = db.init_db()
+        db.inserer_annonce(conn, {"source": "pap", "url": "https://www.pap.fr/annonces/a-r1", "prix": 1.0,
+                                  "surface": 40.0, "ville": "Rungis", "photos": []})
+        main.executer("recalculer", conn=conn)
+        a = db.lister_annonces(conn)[0]
+    assert a["prix"] is None and a["surface"] == 40.0

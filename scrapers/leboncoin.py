@@ -9,6 +9,7 @@ import json
 import logging
 from urllib.parse import urlencode
 
+import config
 from . import base
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ def _parser_ad(ad: dict) -> dict | None:
     prix = ad.get("price")
     if isinstance(prix, list):
         prix = prix[0] if prix else None
+    if prix is not None and base.nombre(prix) is not None and base.nombre(prix) < config.PRIX_MIN_PLAUSIBLE:
+        prix = None
     localisation = ad.get("location") or {}
     return base.normaliser_annonce(
         SOURCE,

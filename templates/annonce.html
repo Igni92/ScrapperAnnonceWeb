@@ -69,7 +69,7 @@
               <td class="sous">
                 {% set d = t.detail or {} %}
                 {% if d.erreur %}{{ d.erreur }}{% endif %}
-                {% if d.correspondances is defined and d.correspondances is not none %}{{ d.correspondances }} correspondance(s){% endif %}
+                {% if d.a_pied %}🚶 à pied (même commune que la destination){% elif d.correspondances is defined and d.correspondances is not none %}{{ d.correspondances }} correspondance(s){% endif %}
                 {% if d.lignes %} · {{ d.lignes|join(', ') }}{% endif %}
                 {% if d.distance_km %}{{ d.distance_km }} km{% endif %}
               </td>

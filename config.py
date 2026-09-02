@@ -27,6 +27,10 @@ PRIX_MIN_REF = 700       # loyer en dessous duquel le sous-score prix est à 100
 SURFACE_MIN = 30         # m²
 SURFACE_MAX_REF = 70     # surface à partir de laquelle le sous-score surface est à 100
 PIECES_MIN = 2
+# Garde-fous contre les erreurs de lecture des sites : en dessous, la valeur est jugée
+# implausible et remplacée par « inconnu » (l'annonce n'est pas écartée, elle est signalée).
+PRIX_MIN_PLAUSIBLE = 200     # €/mois
+SURFACE_MIN_PLAUSIBLE = 9    # m²
 
 # ---------------------------------------------------------------------------
 # Destinations et temps de trajet réels

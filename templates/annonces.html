@@ -72,11 +72,12 @@
       <td class="num">{% if an.score_etat is not none %}<span class="score {{ classe_score(an.score_etat) }}">{{ an.score_etat }}</span>{% else %}<span class="badge neutre">à analyser</span>{% endif %}</td>
       {% if destinations %}<td class="trajet">
         {% if a.trajets %}{% for nom, t in a.trajets.items() %}
-          <div class="{{ 'ko' if t.minutes is not none and t.max_minutes is not none and t.minutes > t.max_minutes }}" title="{{ nom }} ({{ t.mode }})">{{ '🚇' if t.mode == 'transport' else '🚗' }} {{ t.minutes|int ~ ' min' if t.minutes is not none else '?' }}{% if a.trajets|length > 1 %} <span class="sous">{{ nom }}</span>{% endif %}</div>
+          {% set a_pied = (t.detail or {}).get('a_pied') %}
+          <div class="{{ 'ko' if t.minutes is not none and t.max_minutes is not none and t.minutes > t.max_minutes }}" title="{{ nom }} ({{ 'à pied, même commune' if a_pied else t.mode }})">{{ '🚶' if a_pied else ('🚇' if t.mode == 'transport' else '🚗') }} {{ t.minutes|int ~ ' min' if t.minutes is not none else '?' }}{% if a.trajets|length > 1 %} <span class="sous">{{ nom }}</span>{% endif %}</div>
         {% endfor %}{% else %}<span class="badge neutre">à calculer</span>{% endif %}
       </td>{% endif %}
-      <td class="num">{{ a.prix|euros }}</td>
-      <td class="num">{{ a.surface|int if a.surface else '?' }} m²</td>
+      <td class="num">{% if a.prix %}{{ a.prix|euros }}{% else %}<span class="badge neutre" title="Loyer non lu sur le site">?</span>{% endif %}</td>
+      <td class="num">{% if a.surface %}{{ a.surface|int }} m²{% else %}<span class="badge neutre" title="Surface non lue sur le site">?</span>{% endif %}</td>
       <td class="num">{{ a.pieces or '?' }}</td>
       <td>{{ a.ville }}</td>
       <td><div class="actions">

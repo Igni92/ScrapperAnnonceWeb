@@ -77,15 +77,50 @@ def est_url_annonce(url: str, domaine: str, motif: str) -> bool:
     return p.netloc.endswith(domaine) and re.search(motif, p.path) is not None
 
 
+def _compacter(texte) -> str:
+    """Retire tous les espaces (y compris insécables « 1 250 ») et unifie la virgule décimale."""
+    return re.sub(r"\s+", "", str(texte)).replace(",", ".")
+
+
 def nombre(texte) -> float | None:
     """'1 250 €' -> 1250.0 ; '45,5 m²' -> 45.5 ; None si rien à extraire."""
     if texte is None:
         return None
     if isinstance(texte, (int, float)):
         return float(texte)
-    t = str(texte).replace(" ", "").replace("\xa0", "").replace(" ", "").replace(",", ".")
-    m = re.search(r"\d+(?:\.\d+)?", t)
+    m = re.search(r"\d+(?:\.\d+)?", _compacter(texte))
     return float(m.group()) if m else None
+
+
+def extraire_prix(texte) -> float | None:
+    """Premier montant suivi de € dans un texte libre : « 1 250 € / mois » -> 1250. None sinon."""
+    if texte is None:
+        return None
+    m = re.search(r"(\d+(?:\.\d{1,2})?)(?:€|euros?\b)", _compacter(texte), re.I)
+    if not m:
+        return None
+    valeur = float(m.group(1))
+    return valeur if valeur >= config.PRIX_MIN_PLAUSIBLE else None
+
+
+def extraire_surface(texte) -> float | None:
+    """« 45,5 m² » -> 45.5 (accepte m2 / m²). None si absent ou implausible."""
+    if texte is None:
+        return None
+    m = re.search(r"(\d+(?:\.\d+)?)m[²2]", _compacter(texte), re.I)
+    if not m:
+        return None
+    valeur = float(m.group(1))
+    return valeur if valeur >= config.SURFACE_MIN_PLAUSIBLE else None
+
+
+def extraire_pieces(texte) -> int | None:
+    """« 2 pièces », « 3 p. », « T2 », « F3 » -> nombre de pièces."""
+    if texte is None:
+        return None
+    t = str(texte)
+    m = re.search(r"(\d+)\s*(?:pi[èe]ces?|p\.?(?=\s|$))", t, re.I) or re.search(r"\b[TF](\d)\b", t)
+    return int(m.group(1)) if m else None
 
 
 def entier(texte) -> int | None:
@@ -178,14 +213,21 @@ def nettoyer_ville(texte) -> str:
 
 def normaliser_annonce(source: str, titre, ville, prix, surface, pieces, url, photos,
                        code_postal=None, adresse=None) -> dict:
+    prix_val, surface_val = nombre(prix), nombre(surface)
+    if prix_val is not None and prix_val < config.PRIX_MIN_PLAUSIBLE:
+        log.warning("Loyer implausible (%s €) ignoré pour %s", prix_val, url)
+        prix_val = None
+    if surface_val is not None and surface_val < config.SURFACE_MIN_PLAUSIBLE:
+        log.warning("Surface implausible (%s m²) ignorée pour %s", surface_val, url)
+        surface_val = None
     return {
         "source": source,
         "titre": (titre or "").strip(),
         "ville": nettoyer_ville(ville),
         "code_postal": (str(code_postal).strip() if code_postal else None) or code_postal_dans(ville),
         "adresse": (adresse or "").strip() or None,
-        "prix": nombre(prix),
-        "surface": nombre(surface),
+        "prix": prix_val,
+        "surface": surface_val,
         "pieces": entier(pieces),
         "url": url,
         "photos": limiter_photos(photos),

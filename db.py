@@ -270,6 +270,11 @@ def maj_analyse_photo(conn: sqlite3.Connection, url: str, analyse: dict,
     conn.commit()
 
 
+def maj_caracteristiques(conn: sqlite3.Connection, url: str, prix, surface) -> None:
+    conn.execute("UPDATE annonces SET prix = ?, surface = ? WHERE url = ?", (prix, surface, url))
+    conn.commit()
+
+
 def maj_score(conn: sqlite3.Connection, url: str, score: float) -> None:
     conn.execute("UPDATE annonces SET score = ? WHERE url = ?", (score, url))
     conn.commit()
