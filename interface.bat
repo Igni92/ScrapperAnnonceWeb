@@ -13,7 +13,12 @@ if errorlevel 1 (
 if not exist .venv (
     echo Creation de l'environnement virtuel...
     py -3 -m venv .venv || exit /b 1
-    call .venv\Scripts\pip.exe install -r requirements.txt || exit /b 1
+)
+REM Installe ou met a jour les dependances a chaque lancement (rapide si rien ne manque).
+.venv\Scripts\python.exe -m pip install -q -r requirements.txt || (
+    echo Echec de l'installation des dependances.
+    pause
+    exit /b 1
 )
 
 .venv\Scripts\python.exe app.py
