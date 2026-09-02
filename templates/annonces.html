@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block titre %}Annonces{% endblock %}
+{% macro classe_score(s) %}{{ 's-nc' if s is none else ('s-haut' if s >= 65 else ('s-moyen' if s >= 45 else 's-bas')) }}{% endmacro %}
+{% block contenu %}
+<h1>Annonces</h1>
+
+<div class="stats">
+  <div class="stat"><div class="val">{{ stats.visibles }}</div><div class="lib">annonces</div></div>
+  <div class="stat"><div class="val">{{ stats.nouvelles_24h }}</div><div class="lib">nouvelles (24 h)</div></div>
+  <div class="stat"><div class="val">{{ stats.favoris }}</div><div class="lib">favoris</div></div>
+  <div class="stat {{ 'alerte' if stats.moisissure }}"><div class="val">{{ stats.moisissure }}</div><div class="lib">avec moisissure</div></div>
+  <div class="stat"><div class="val">{{ stats.non_analysees }}</div><div class="lib">photos à analyser</div></div>
+  <div class="stat"><div class="val">{{ '%.0f'|format(stats.score_moyen) if stats.score_moyen else '–' }}</div><div class="lib">score moyen</div></div>
+</div>
+
+<form class="filtres" method="get">
+  <label>Recherche <input type="search" name="q" value="{{ filtres.q or '' }}" placeholder="titre, ville, résumé…"></label>
+  <label>Site
+    <select name="source"><option value="">Tous</option>
+      {% for s in distinctes.sources %}<option value="{{ s }}" {{ 'selected' if filtres.source == s }}>{{ s }}</option>{% endfor %}
+    </select></label>
+  <label>Ville
+    <select name="ville"><option value="">Toutes</option>
+      {% for v in distinctes.villes %}<option value="{{ v }}" {{ 'selected' if filtres.ville == v }}>{{ v }}</option>{% endfor %}
+    </select></label>
+  <label>Moisissure
+    <select name="moisissure">
+      <option value="" {{ 'selected' if filtres.moisissure is none }}>Indifférent</option>
+      <option value="0" {{ 'selected' if filtres.moisissure == false }}>Sans</option>
+      <option value="1" {{ 'selected' if filtres.moisissure == true }}>Avec</option>
+    </select></label>
+  <label>Score min <input type="number" name="score_min" min="0" max="100" value="{{ filtres.score_min|int if filtres.score_min is not none else '' }}" style="width:90px"></label>
+  <label>Tri
+    <select name="tri">
+      {% for cle, lib in [('score','Score'),('etat','État'),('prix','Prix croissant'),('surface','Surface'),('recent','Plus récentes')] %}
+      <option value="{{ cle }}" {{ 'selected' if filtres.tri == cle }}>{{ lib }}</option>
+      {% endfor %}
+    </select></label>
+  <label><span><input type="checkbox" name="favoris" value="1" {{ 'checked' if filtres.favoris }}> Favoris</span></label>
+  <label><span><input type="checkbox" name="masquees" value="1" {{ 'checked' if filtres.masquees }}> Masquées</span></label>
+  <button type="submit">Filtrer</button>
+  <a class="btn sec" href="{{ url_for('annonces') }}">Réinitialiser</a>
+</form>
+
+{% if not annonces %}
+  <div class="vide">
+    Aucune annonce{% if stats.total == 0 %} en base pour l'instant{% endif %}.
+    {% if stats.total == 0 %}<br><a href="{{ url_for('lancer') }}">Lancer un premier scraping</a>{% endif %}
+  </div>
+{% else %}
+<table>
+  <thead><tr>
+    <th></th><th>Annonce</th><th class="num">Score</th><th class="num">État</th><th class="num">Loyer</th><th class="num">Surface</th><th class="num">Pièces</th><th>Ville</th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for a in annonces %}
+    {% set an = a.analyse_photo or {'score_etat': none, 'moisissure_detectee': false, 'resume': none} %}
+    <tr class="{{ 'moisissure' if an.moisissure_detectee }}">
+      <td><a href="{{ url_for('annonce', annonce_id=a.id) }}">
+        {% if a.photos %}<img class="vignette" src="{{ a.photos[0] }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<div class="sans-photo">sans photo</div>{% endif %}
+      </a></td>
+      <td>
+        <a class="titre-annonce" href="{{ url_for('annonce', annonce_id=a.id) }}">{{ a.titre or a.url }}</a>
+        <span class="badge src">{{ a.source }}</span>
+        {% if an.moisissure_detectee %}<span class="badge alerte">⚠ moisissure</span>{% endif %}
+        {% if a.favori %}<span title="Favori">⭐</span>{% endif %}
+        {% if an.resume %}<div class="sous">{{ an.resume|truncate(120) }}</div>{% endif %}
+      </td>
+      <td class="num"><span class="score {{ classe_score(a.score) }}">{{ '%.0f'|format(a.score) if a.score is not none else '–' }}</span></td>
+      <td class="num">{% if an.score_etat is not none %}<span class="score {{ classe_score(an.score_etat) }}">{{ an.score_etat }}</span>{% else %}<span class="badge neutre">à analyser</span>{% endif %}</td>
+      <td class="num">{{ a.prix|euros }}</td>
+      <td class="num">{{ a.surface|int if a.surface else '?' }} m²</td>
+      <td class="num">{{ a.pieces or '?' }}</td>
+      <td>{{ a.ville }}</td>
+      <td><div class="actions">
+        <button class="icone {{ 'actif' if a.favori }}" title="Favori" onclick="actionAnnonce({{ a.id }}, 'favori', this)">⭐</button>
+        <button class="icone" title="{{ 'Réafficher' if a.masquee else 'Masquer' }}" onclick="actionAnnonce({{ a.id }}, 'masquer', this)">{{ '↩' if a.masquee else '🚫' }}</button>
+        <a class="icone" title="Ouvrir l'annonce" href="{{ a.url }}" target="_blank" rel="noopener">↗</a>
+      </div></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="sous">{{ annonces|length }} annonce(s) affichée(s).</p>
+{% endif %}
+{% endblock %}

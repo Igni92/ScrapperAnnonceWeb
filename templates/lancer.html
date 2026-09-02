@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block titre %}Lancer{% endblock %}
+{% block contenu %}
+<h1>Lancer un traitement</h1>
+{% if not cli_ok %}
+<div class="flash erreur">La commande <code>claude</code> est introuvable : l'analyse photo échouera avec le moteur « claude_code ». Installez Claude Code et connectez-vous, ou choisissez le moteur « api » dans les paramètres.</div>
+{% endif %}
+
+<div class="modes">
+  <div class="mode"><strong>Scraping complet</strong><p>Récupère les annonces, filtre, analyse les photos des nouvelles annonces et les classe. Les annonces déjà en base ne sont jamais ré-analysées.</p><button data-mode="complet">Lancer</button></div>
+  <div class="mode"><strong>Scraping rapide</strong><p>Récupère et classe sans analyser les photos. Idéal pour un premier tri prix / trajet / surface.</p><button data-mode="rapide">Lancer</button></div>
+  <div class="mode"><strong>Analyser les photos en attente</strong><p>Analyse les annonces en base jamais analysées (scraping rapide, erreurs, ré-analyses demandées).</p><button data-mode="manquantes">Lancer</button></div>
+  <div class="mode"><strong>Recalculer les scores</strong><p>Réapplique la pondération et les critères actuels à toutes les annonces, sans scraping ni analyse.</p><button data-mode="recalculer" class="sec">Lancer</button></div>
+</div>
+
+<h2>Journal <span id="etat" class="sous"></span></h2>
+<pre class="journal" id="journal">{% if job %}{{ job.lignes|join('\n') }}{% else %}Aucun traitement lancé depuis le démarrage de l'interface.{% endif %}</pre>
+<p id="resume" class="sous"></p>
+
+{% if historique|length > 1 %}
+<h2>Historique de la session</h2>
+<table><thead><tr><th>Traitement</th><th>Statut</th><th class="num">Durée</th><th>Résultat</th></tr></thead><tbody>
+{% for j in historique %}
+<tr><td>{{ modes.get(j.mode, j.mode) }}</td><td>{{ j.statut }}</td><td class="num">{{ j.etat().duree }} s</td>
+<td class="sous">{% if j.resume %}{{ j.resume.nouvelles }} nouvelle(s), {{ j.resume.analysees }} analysée(s), {{ j.resume.recalculees }} recalculée(s){% elif j.erreur %}{{ j.erreur }}{% endif %}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endif %}
+
+<script>
+  const journal = document.getElementById("journal"), etat = document.getElementById("etat"),
+        resume = document.getElementById("resume"), boutons = document.querySelectorAll("button[data-mode]");
+  let jobId = null, depuis = 0, minuteur = null;
+
+  function verrouiller(v) { boutons.forEach(b => b.disabled = v); }
+
+  async function lancer(mode) {
+    const r = await fetch("/api/lancer", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode})});
+    const d = await r.json();
+    if (!d.ok) { alert(d.erreur); return; }
+    journal.textContent = ""; resume.textContent = ""; depuis = 0; jobId = d.job.id;
+    verrouiller(true); suivre();
+  }
+
+  async function suivre() {
+    const r = await fetch(`/api/job?depuis=${depuis}`); const d = await r.json();
+    const j = d.job; if (!j) return;
+    if (jobId === null) { jobId = j.id; }
+    if (j.id !== jobId) { journal.textContent = ""; depuis = 0; jobId = j.id; }
+    if (j.lignes.length) { journal.textContent += (journal.textContent ? "\n" : "") + j.lignes.join("\n"); journal.scrollTop = journal.scrollHeight; }
+    depuis = j.total_lignes;
+    const libelles = {en_attente: "en attente", en_cours: "en cours…", termine: "terminé", erreur: "erreur"};
+    etat.textContent = `— ${j.libelle} : ${libelles[j.statut] || j.statut} (${j.duree} s)`;
+    if (j.statut === "en_cours" || j.statut === "en_attente") { verrouiller(true); minuteur = setTimeout(suivre, 1500); }
+    else {
+      verrouiller(false);
+      if (j.resume) resume.innerHTML = `${j.resume.nouvelles} nouvelle(s) annonce(s), ${j.resume.analysees} analysée(s), ${j.resume.recalculees} score(s) recalculé(s). <a href="/">Voir les annonces</a>`;
+      if (j.erreur) resume.textContent = j.erreur;
+    }
+  }
+
+  boutons.forEach(b => b.addEventListener("click", () => lancer(b.dataset.mode)));
+  {% if job %}suivre();{% endif %}
+</script>
+{% endblock %}

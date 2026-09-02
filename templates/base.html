@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block titre %}Annonces{% endblock %} · ScrapperAnnonceWeb</title>
+<style>
+  :root {
+    --fond: #f4f5f7; --carte: #fff; --texte: #1f2933; --muted: #6b7280; --bord: #e2e5ea;
+    --accent: #2563eb; --accent-fonce: #1d4ed8; --ok: #16a34a; --alerte: #dc2626; --alerte-fond: #fef2f2;
+    --avert: #d97706; --avert-fond: #fffbeb; --neutre: #9ca3af;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--fond); color: var(--texte); }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  header { background: #111827; color: #fff; padding: 0 24px; display: flex; align-items: center; gap: 24px; height: 52px; }
+  header .marque { font-weight: 700; letter-spacing: .3px; color: #fff; }
+  header nav a { color: #cbd5e1; padding: 6px 10px; border-radius: 6px; }
+  header nav a.actif, header nav a:hover { background: #1f2937; color: #fff; text-decoration: none; }
+  header .etat-job { margin-left: auto; font-size: 13px; color: #fbbf24; }
+  main { max-width: 1240px; margin: 24px auto; padding: 0 20px; }
+  h1 { font-size: 22px; margin: 0 0 16px; } h2 { font-size: 17px; margin: 24px 0 10px; }
+  .carte { background: var(--carte); border: 1px solid var(--bord); border-radius: 10px; padding: 16px 18px; }
+  .flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; }
+  .flash.ok { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+  .flash.erreur { background: var(--alerte-fond); color: #991b1b; border: 1px solid #fecaca; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .stat { background: var(--carte); border: 1px solid var(--bord); border-radius: 10px; padding: 12px 14px; }
+  .stat .val { font-size: 24px; font-weight: 700; } .stat .lib { color: var(--muted); font-size: 13px; }
+  .stat.alerte .val { color: var(--alerte); }
+  form.filtres { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 16px; }
+  form.filtres label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 3px; }
+  input, select, textarea { font: inherit; padding: 6px 9px; border: 1px solid #cbd2dc; border-radius: 6px; background: #fff; color: var(--texte); }
+  input[type=checkbox] { width: auto; }
+  button, .btn { font: inherit; padding: 7px 14px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; display: inline-block; }
+  button:hover, .btn:hover { background: var(--accent-fonce); text-decoration: none; }
+  button.sec, .btn.sec { background: #fff; color: var(--texte); border-color: #cbd2dc; } button.sec:hover, .btn.sec:hover { background: #f3f4f6; }
+  button.danger { background: #fff; color: var(--alerte); border-color: #fca5a5; } button.danger:hover { background: var(--alerte-fond); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; background: var(--carte); border: 1px solid var(--bord); border-radius: 10px; overflow: hidden; }
+  th, td { padding: 9px 10px; text-align: left; border-bottom: 1px solid var(--bord); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); background: #fafbfc; }
+  tr:last-child td { border-bottom: 0; } tr.moisissure td { background: var(--alerte-fond); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .vignette { width: 84px; height: 60px; object-fit: cover; border-radius: 6px; background: #e5e7eb; display: block; }
+  .sans-photo { width: 84px; height: 60px; border-radius: 6px; background: #e5e7eb; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.src { background: #eef2ff; color: #3730a3; }
+  .badge.alerte { background: var(--alerte); color: #fff; }
+  .badge.avert { background: var(--avert-fond); color: #92400e; }
+  .badge.neutre { background: #f3f4f6; color: var(--muted); }
+  .score { display: inline-block; min-width: 44px; text-align: center; padding: 3px 6px; border-radius: 6px; font-weight: 700; color: #fff; }
+  .s-haut { background: var(--ok); } .s-moyen { background: var(--avert); } .s-bas { background: var(--alerte); } .s-nc { background: var(--neutre); }
+  .titre-annonce { font-weight: 600; } .sous { color: var(--muted); font-size: 13px; }
+  .actions { display: flex; gap: 6px; white-space: nowrap; }
+  .icone { border: 1px solid #cbd2dc; background: #fff; color: var(--texte); padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  .icone.actif { background: #fef3c7; border-color: #fcd34d; }
+  .galerie { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .galerie img { width: 100%; height: 170px; object-fit: cover; border-radius: 8px; background: #e5e7eb; }
+  .grille-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; } @media (max-width: 900px) { .grille-2 { grid-template-columns: 1fr; } }
+  dl.infos { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; } dl.infos dt { color: var(--muted); } dl.infos dd { margin: 0; }
+  .barre { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; } .barre span { display: block; height: 100%; background: var(--accent); }
+  .alerte-bloc { background: var(--alerte-fond); border: 1px solid #fecaca; color: #991b1b; padding: 12px 14px; border-radius: 8px; font-weight: 600; }
+  fieldset { border: 1px solid var(--bord); border-radius: 10px; padding: 14px 18px; margin: 0 0 16px; background: var(--carte); }
+  legend { font-weight: 700; padding: 0 6px; }
+  .champs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px 18px; }
+  .champ label { display: block; font-weight: 600; font-size: 13px; margin-bottom: 3px; } .champ .aide { font-size: 12px; color: var(--muted); }
+  .champ input, .champ select, .champ textarea { width: 100%; } .champ textarea { min-height: 96px; font-family: ui-monospace, monospace; }
+  .somme-poids { font-weight: 600; } .somme-poids.ko { color: var(--alerte); }
+  pre.journal { background: #0f172a; color: #e2e8f0; padding: 14px; border-radius: 8px; max-height: 480px; overflow: auto; font-size: 13px; white-space: pre-wrap; margin: 0; }
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .mode { border: 1px solid var(--bord); border-radius: 10px; padding: 14px; background: var(--carte); display: flex; flex-direction: column; gap: 8px; }
+  .mode strong { font-size: 15px; } .mode p { margin: 0; color: var(--muted); font-size: 13px; flex: 1; }
+  .vide { padding: 40px; text-align: center; color: var(--muted); background: var(--carte); border: 1px dashed var(--bord); border-radius: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <a class="marque" href="{{ url_for('annonces') }}">🏠 ScrapperAnnonceWeb</a>
+  <nav>
+    <a href="{{ url_for('annonces') }}" class="{{ 'actif' if request.endpoint in ('annonces', 'annonce') }}">Annonces</a>
+    <a href="{{ url_for('lancer') }}" class="{{ 'actif' if request.endpoint == 'lancer' }}">Lancer</a>
+    <a href="{{ url_for('parametres') }}" class="{{ 'actif' if request.endpoint == 'parametres' }}">Paramètres</a>
+  </nav>
+  {% if job_en_cours %}<span class="etat-job">⏳ Traitement en cours…</span>{% endif %}
+</header>
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% endwith %}
+  {% block contenu %}{% endblock %}
+</main>
+<script>
+  // Actions sur une annonce (favori, masquer) sans rechargement.
+  async function actionAnnonce(id, action, bouton) {
+    const r = await fetch(`/annonce/${id}/${action}`, {method: "POST", headers: {"X-Requested-With": "fetch"}});
+    if (!r.ok) { alert("Action impossible"); return; }
+    const d = await r.json();
+    if (action === "favori" && bouton) bouton.classList.toggle("actif", d.favori);
+    if (action === "masquer" || action === "supprimer") {
+      const ligne = bouton && bouton.closest("tr"); if (ligne) ligne.remove(); else location.href = "/";
+    }
+  }
+</script>
+</body>
+</html>

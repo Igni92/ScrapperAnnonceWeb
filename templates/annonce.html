@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block titre %}{{ a.titre or 'Annonce' }}{% endblock %}
+{% macro classe_score(s) %}{{ 's-nc' if s is none else ('s-haut' if s >= 65 else ('s-moyen' if s >= 45 else 's-bas')) }}{% endmacro %}
+{% block contenu %}
+<p><a href="{{ url_for('annonces') }}">← Retour aux annonces</a></p>
+<h1>{{ a.titre or a.url }}
+  <span class="badge src">{{ a.source }}</span>
+  {% if a.favori %}<span title="Favori">⭐</span>{% endif %}
+  {% if a.masquee %}<span class="badge neutre">masquée</span>{% endif %}
+</h1>
+
+{% if analyse.moisissure_detectee %}
+<div class="alerte-bloc" style="margin-bottom:16px">⚠ Moisissure ou traces d'humidité détectées sur les photos.</div>
+{% endif %}
+
+<div class="grille-2">
+  <div>
+    <div class="carte">
+      <h2 style="margin-top:0">Photos {% if a.photos %}<span class="sous">({{ a.photos|length }})</span>{% endif %}</h2>
+      {% if a.photos %}
+      <div class="galerie">
+        {% for p in a.photos %}<a href="{{ p }}" target="_blank" rel="noopener"><img src="{{ p }}" alt="Photo {{ loop.index }}" loading="lazy" referrerpolicy="no-referrer"></a>{% endfor %}
+      </div>
+      {% else %}<p class="sous">Aucune photo récupérée pour cette annonce.</p>{% endif %}
+    </div>
+
+    <div class="carte" style="margin-top:16px">
+      <h2 style="margin-top:0">Analyse de l'état
+        {% if analyse.score_etat is not none %}<span class="score {{ classe_score(analyse.score_etat) }}">{{ analyse.score_etat }}</span>{% endif %}
+      </h2>
+      {% if a.analyse_photo %}
+        <p>{{ analyse.resume }}</p>
+        {% if analyse.points_negatifs %}
+        <strong>Points négatifs</strong>
+        <ul>{% for p in analyse.points_negatifs %}<li>{{ p }}</li>{% endfor %}</ul>
+        {% else %}<p class="sous">Aucun point négatif signalé.</p>{% endif %}
+        <p class="sous">{{ analyse.nb_photos_analysees or 0 }} photo(s) analysée(s) le {{ analyse.analyse_le|date_courte }}.</p>
+      {% else %}
+        <p class="sous">Photos pas encore analysées. Lancez « Analyse photo des annonces en attente » depuis la page Lancer.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="carte">
+      <h2 style="margin-top:0">Score global <span class="score {{ classe_score(a.score) }}">{{ '%.0f'|format(a.score) if a.score is not none else '–' }}</span></h2>
+      {% for nom, (valeur, poids) in sous_scores.items() %}
+        <div style="margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;font-size:13px"><span>{{ nom }} <span class="sous">× {{ poids }}</span></span><strong>{{ '%.0f'|format(valeur) }}</strong></div>
+          <div class="barre"><span style="width:{{ valeur|int }}%"></span></div>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="carte" style="margin-top:16px">
+      <h2 style="margin-top:0">Informations</h2>
+      <dl class="infos">
+        <dt>Loyer</dt><dd>{{ a.prix|euros }}</dd>
+        <dt>Surface</dt><dd>{{ a.surface|int if a.surface else '?' }} m²</dd>
+        <dt>Pièces</dt><dd>{{ a.pieces or '?' }}</dd>
+        <dt>Ville</dt><dd>{{ a.ville or '?' }} <span class="sous">(trajet estimé {{ trajet_minutes }} min)</span></dd>
+        <dt>Ajoutée le</dt><dd>{{ a.cree_le|date_courte }}</dd>
+        <dt>Lien</dt><dd><a href="{{ a.url }}" target="_blank" rel="noopener">Ouvrir sur {{ a.source }} ↗</a></dd>
+      </dl>
+    </div>
+
+    <div class="carte" style="margin-top:16px">
+      <h2 style="margin-top:0">Actions</h2>
+      <div class="actions" style="flex-wrap:wrap">
+        <form method="post" action="{{ url_for('action_annonce', annonce_id=a.id, action='favori') }}"><button class="sec" type="submit">{{ '⭐ Retirer des favoris' if a.favori else '☆ Ajouter aux favoris' }}</button></form>
+        <form method="post" action="{{ url_for('action_annonce', annonce_id=a.id, action='masquer') }}"><button class="sec" type="submit">{{ '↩ Réafficher' if a.masquee else '🚫 Masquer' }}</button></form>
+        <form method="post" action="{{ url_for('action_annonce', annonce_id=a.id, action='reanalyser') }}"><button class="sec" type="submit" {{ 'disabled' if not a.photos }}>🔄 Ré-analyser les photos</button></form>
+        <form method="post" action="{{ url_for('action_annonce', annonce_id=a.id, action='supprimer') }}" onsubmit="return confirm('Supprimer définitivement cette annonce ?')"><button class="danger" type="submit">🗑 Supprimer</button></form>
+      </div>
+      <form method="post" action="{{ url_for('action_annonce', annonce_id=a.id, action='notes') }}" style="margin-top:12px">
+        <label style="font-weight:600;font-size:13px">Mes notes</label>
+        <textarea name="notes" style="width:100%;min-height:70px;margin:4px 0">{{ a.notes or '' }}</textarea>
+        <button class="sec" type="submit">Enregistrer les notes</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

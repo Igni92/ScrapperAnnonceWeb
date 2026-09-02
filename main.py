@@ -1,4 +1,7 @@
-"""Orchestration : scraping -> filtrage -> analyse photo (nouvelles annonces) -> scoring -> DB -> classement."""
+"""Orchestration : scraping -> filtrage -> analyse photo (nouvelles annonces) -> scoring -> DB -> classement.
+
+`executer(mode, ...)` est le point d'entrée commun à la ligne de commande et à l'interface web.
+"""
 
 import argparse
 import logging
@@ -11,6 +14,13 @@ import scoring
 from scrapers import SCRAPERS
 
 log = logging.getLogger("main")
+
+MODES = {
+    "complet": "Scraping + analyse photo des nouvelles annonces",
+    "rapide": "Scraping seul (sans analyse photo)",
+    "manquantes": "Analyse photo des annonces en attente",
+    "recalculer": "Recalcul des scores avec la pondération actuelle",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +35,9 @@ def scraper_tout(sources: list[str]) -> list[dict]:
     }
     annonces: list[dict] = []
     for nom in sources:
+        if nom not in SCRAPERS:
+            log.warning("Source inconnue ignorée : %s", nom)
+            continue
         try:
             resultats = SCRAPERS[nom](criteres)
         except Exception:  # un scraper cassé ne doit pas bloquer les autres
@@ -69,7 +82,7 @@ def analyser_nouvelles(conn, nouvelles: list[dict], max_photos: int | None) -> N
         analyse = annonce.get("analyse_photo") or {}
         if analyse.get("statut") == "erreur":
             # Erreur technique : on insère sans analyse pour pouvoir réessayer plus tard
-            # (--analyser-manquantes), sans jamais mettre en cache un résultat bidon.
+            # (mode "manquantes"), sans jamais mettre en cache un résultat bidon.
             annonce["analyse_photo"] = None
         annonce["score"] = scoring.calculer_score_annonce(annonce)
         db.inserer_annonce(conn, annonce)
@@ -77,12 +90,12 @@ def analyser_nouvelles(conn, nouvelles: list[dict], max_photos: int | None) -> N
     photo_analysis.analyser_annonces(nouvelles, max_photos=max_photos, apres_chaque=persister)
 
 
-def analyser_manquantes(conn, max_photos: int | None) -> None:
-    """Rattrape les annonces en base sans analyse (insérées lors d'un run --skip-photos ou en erreur)."""
+def analyser_manquantes(conn, max_photos: int | None) -> int:
+    """Rattrape les annonces en base sans analyse (insérées en mode rapide ou en erreur)."""
     manquantes = db.annonces_sans_analyse(conn)
     if not manquantes:
         log.info("Aucune annonce en attente d'analyse photo.")
-        return
+        return 0
     log.info("Rattrapage : %d annonce(s) en base sans analyse photo", len(manquantes))
 
     def persister(annonce: dict) -> None:
@@ -94,10 +107,54 @@ def analyser_manquantes(conn, max_photos: int | None) -> None:
         db.maj_analyse_photo(conn, annonce["url"], analyse, score=score)
 
     photo_analysis.analyser_annonces(manquantes, max_photos=max_photos, apres_chaque=persister)
+    return len(manquantes)
+
+
+def recalculer_scores(conn) -> int:
+    """Recalcule le score de toutes les annonces (après changement de pondération)."""
+    annonces = db.toutes_annonces(conn)
+    for a in annonces:
+        db.maj_score(conn, a["url"], scoring.calculer_score_annonce(a))
+    log.info("%d score(s) recalculé(s)", len(annonces))
+    return len(annonces)
+
+
+def executer(mode: str, sources: list[str] | None = None, max_photos: int | None = None,
+             conn=None) -> dict:
+    """Exécute un mode de MODES et renvoie un résumé chiffré."""
+    if mode not in MODES:
+        raise ValueError(f"Mode inconnu : {mode}")
+    conn = conn or db.init_db()
+    resume = {"mode": mode, "brutes": 0, "filtrees": 0, "nouvelles": 0, "analysees": 0, "recalculees": 0}
+    log.info("Démarrage : %s", MODES[mode])
+
+    if mode in ("complet", "rapide"):
+        sources = sources or list(config.SOURCES_ACTIVES)
+        brutes = scraper_tout(sources)
+        candidates = dedupliquer(filtrer(brutes))
+        connues = db.urls_connues(conn, (a["url"] for a in candidates))
+        nouvelles = [a for a in candidates if a["url"] not in connues]
+        resume.update(brutes=len(brutes), filtrees=len(candidates), nouvelles=len(nouvelles))
+        log.info("%d annonce(s) après filtrage (%d brutes), %d nouvelle(s), %d déjà en base",
+                 len(candidates), len(brutes), len(nouvelles), len(connues))
+        if mode == "rapide":
+            for a in nouvelles:
+                a["score"] = scoring.calculer_score_annonce(a)
+                db.inserer_annonce(conn, a)
+        else:
+            analyser_nouvelles(conn, nouvelles, max_photos)
+            resume["analysees"] = len(nouvelles)
+    elif mode == "manquantes":
+        resume["analysees"] = analyser_manquantes(conn, max_photos)
+    elif mode == "recalculer":
+        resume["recalculees"] = recalculer_scores(conn)
+
+    log.info("Terminé : %s", MODES[mode])
+    return resume
 
 
 # ---------------------------------------------------------------------------
-# Affichage
+# Affichage console
 # ---------------------------------------------------------------------------
 def _tronquer(texte: str, longueur: int) -> str:
     texte = texte or ""
@@ -151,10 +208,12 @@ def parser_args(argv=None) -> argparse.Namespace:
                    help="ne pas lancer l'analyse photo (passage rapide prix/trajet/surface)")
     p.add_argument("--analyser-manquantes", action="store_true",
                    help="analyser les photos des annonces déjà en base mais jamais analysées")
+    p.add_argument("--recalculer", action="store_true",
+                   help="recalculer tous les scores avec la pondération actuelle")
     p.add_argument("--max-photos", type=int, default=None,
                    help=f"photos max par annonce (défaut : {config.MAX_PHOTOS_PAR_ANNONCE})")
-    p.add_argument("--sources", default=",".join(SCRAPERS),
-                   help="sources à scraper, séparées par des virgules (défaut : toutes)")
+    p.add_argument("--sources", default=None,
+                   help="sources à scraper, séparées par des virgules (défaut : SOURCES_ACTIVES)")
     p.add_argument("--no-scrape", action="store_true",
                    help="ne pas scraper, afficher seulement le classement de la base")
     p.add_argument("--limite", type=int, default=30, help="nombre d'annonces affichées")
@@ -169,33 +228,21 @@ def main(argv=None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-    sources = [s.strip() for s in args.sources.split(",") if s.strip()]
+    sources = [s.strip() for s in (args.sources or ",".join(config.SOURCES_ACTIVES)).split(",") if s.strip()]
     inconnues = [s for s in sources if s not in SCRAPERS]
-    if inconnues:
+    if inconnues and not args.no_scrape:
         print(f"Sources inconnues : {', '.join(inconnues)}. Disponibles : {', '.join(SCRAPERS)}",
               file=sys.stderr)
         return 2
 
     conn = db.init_db()
-
     if not args.no_scrape:
-        brutes = scraper_tout(sources)
-        candidates = dedupliquer(filtrer(brutes))
-        log.info("%d annonce(s) après filtrage (%d brutes)", len(candidates), len(brutes))
-
-        connues = db.urls_connues(conn, (a["url"] for a in candidates))
-        nouvelles = [a for a in candidates if a["url"] not in connues]
-        log.info("%d nouvelle(s) annonce(s), %d déjà en base", len(nouvelles), len(connues))
-
-        if args.skip_photos:
-            for a in nouvelles:
-                a["score"] = scoring.calculer_score_annonce(a)
-                db.inserer_annonce(conn, a)
-        else:
-            analyser_nouvelles(conn, nouvelles, args.max_photos)
-
+        executer("rapide" if args.skip_photos else "complet", sources=sources,
+                 max_photos=args.max_photos, conn=conn)
     if args.analyser_manquantes and not args.skip_photos:
-        analyser_manquantes(conn, args.max_photos)
+        executer("manquantes", max_photos=args.max_photos, conn=conn)
+    if args.recalculer:
+        executer("recalculer", conn=conn)
 
     afficher_classement(db.lister_annonces(conn), limite=args.limite)
     return 0

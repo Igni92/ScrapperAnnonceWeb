@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 import config
@@ -17,11 +17,22 @@ COLONNES_SUPPLEMENTAIRES = {
     "resume_etat": "TEXT",
     "nb_photos_analysees": "INTEGER",
     "photo_analyse_le": "TEXT",        # ISO 8601, NULL si pas encore analysé
+    "favori": "INTEGER NOT NULL DEFAULT 0",
+    "masquee": "INTEGER NOT NULL DEFAULT 0",
+    "notes": "TEXT",
+}
+
+TRIS = {
+    "score": "score DESC NULLS LAST, id DESC",
+    "prix": "prix ASC NULLS LAST",
+    "surface": "surface DESC NULLS LAST",
+    "etat": "score_etat DESC NULLS LAST",
+    "recent": "id DESC",
 }
 
 
 def connexion(db_path: str | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path or config.DB_PATH)
+    conn = sqlite3.connect(db_path or config.DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -156,16 +167,110 @@ def get_analyse_photo(conn: sqlite3.Connection, url: str) -> dict | None:
 def annonces_sans_analyse(conn: sqlite3.Connection) -> list[dict]:
     """Annonces en base jamais passées par l'analyse photo (ex. run en --skip-photos)."""
     rows = conn.execute(
-        "SELECT * FROM annonces WHERE photo_analyse_le IS NULL ORDER BY id"
+        "SELECT * FROM annonces WHERE photo_analyse_le IS NULL AND masquee = 0 ORDER BY id"
     ).fetchall()
     return [_annonce_depuis_row(r) for r in rows]
 
 
 def lister_annonces(conn: sqlite3.Connection, limite: int | None = None) -> list[dict]:
-    sql = "SELECT * FROM annonces ORDER BY score DESC NULLS LAST, id DESC"
+    sql = "SELECT * FROM annonces WHERE masquee = 0 ORDER BY score DESC NULLS LAST, id DESC"
     if limite:
         sql += f" LIMIT {int(limite)}"
     return [_annonce_depuis_row(r) for r in conn.execute(sql).fetchall()]
+
+
+def toutes_annonces(conn: sqlite3.Connection) -> list[dict]:
+    return [_annonce_depuis_row(r) for r in conn.execute("SELECT * FROM annonces ORDER BY id")]
+
+
+# ---------------------------------------------------------------------------
+# Interface web
+# ---------------------------------------------------------------------------
+def rechercher_annonces(conn: sqlite3.Connection, source: str | None = None, ville: str | None = None,
+                        moisissure: bool | None = None, favoris: bool = False, masquees: bool = False,
+                        q: str | None = None, score_min: float | None = None,
+                        tri: str = "score", limite: int | None = None) -> list[dict]:
+    conditions, params = [], []
+    conditions.append("masquee = 1" if masquees else "masquee = 0")
+    if source:
+        conditions.append("source = ?"); params.append(source)
+    if ville:
+        conditions.append("ville = ?"); params.append(ville)
+    if moisissure is True:
+        conditions.append("moisissure_detectee = 1")
+    elif moisissure is False:
+        conditions.append("(moisissure_detectee IS NULL OR moisissure_detectee = 0)")
+    if favoris:
+        conditions.append("favori = 1")
+    if q:
+        conditions.append("(titre LIKE ? OR ville LIKE ? OR resume_etat LIKE ?)")
+        motif = f"%{q}%"
+        params.extend([motif, motif, motif])
+    if score_min is not None:
+        conditions.append("score >= ?"); params.append(score_min)
+    sql = "SELECT * FROM annonces WHERE " + " AND ".join(conditions)
+    sql += " ORDER BY " + TRIS.get(tri, TRIS["score"])
+    if limite:
+        sql += f" LIMIT {int(limite)}"
+    return [_annonce_depuis_row(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def get_annonce(conn: sqlite3.Connection, annonce_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM annonces WHERE id = ?", (annonce_id,)).fetchone()
+    return _annonce_depuis_row(row) if row else None
+
+
+def definir_drapeau(conn: sqlite3.Connection, annonce_id: int, champ: str, valeur: bool) -> None:
+    if champ not in ("favori", "masquee"):
+        raise ValueError(f"Champ inconnu : {champ}")
+    conn.execute(f"UPDATE annonces SET {champ} = ? WHERE id = ?", (1 if valeur else 0, annonce_id))
+    conn.commit()
+
+
+def definir_notes(conn: sqlite3.Connection, annonce_id: int, notes: str) -> None:
+    conn.execute("UPDATE annonces SET notes = ? WHERE id = ?", (notes.strip() or None, annonce_id))
+    conn.commit()
+
+
+def reinitialiser_analyse(conn: sqlite3.Connection, annonce_id: int) -> None:
+    """Efface l'analyse photo : l'annonce sera reprise au prochain rattrapage."""
+    conn.execute(
+        """UPDATE annonces SET score_etat = NULL, moisissure_detectee = NULL, points_negatifs = NULL,
+                  resume_etat = NULL, nb_photos_analysees = NULL, photo_analyse_le = NULL
+            WHERE id = ?""",
+        (annonce_id,),
+    )
+    conn.commit()
+
+
+def supprimer_annonce(conn: sqlite3.Connection, annonce_id: int) -> None:
+    conn.execute("DELETE FROM annonces WHERE id = ?", (annonce_id,))
+    conn.commit()
+
+
+def statistiques(conn: sqlite3.Connection) -> dict:
+    depuis = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+    row = conn.execute(
+        """
+        SELECT COUNT(*)                                            AS total,
+               SUM(masquee = 0)                                    AS visibles,
+               SUM(favori = 1)                                     AS favoris,
+               SUM(moisissure_detectee = 1 AND masquee = 0)        AS moisissure,
+               SUM(photo_analyse_le IS NULL AND masquee = 0)       AS non_analysees,
+               AVG(CASE WHEN masquee = 0 THEN score END)           AS score_moyen,
+               SUM(cree_le >= ?)                                   AS nouvelles_24h
+          FROM annonces
+        """,
+        (depuis,),
+    ).fetchone()
+    return {k: (row[k] or 0) for k in row.keys()}
+
+
+def valeurs_distinctes(conn: sqlite3.Connection) -> dict:
+    sources = [r[0] for r in conn.execute("SELECT DISTINCT source FROM annonces ORDER BY source")]
+    villes = [r[0] for r in conn.execute(
+        "SELECT DISTINCT ville FROM annonces WHERE ville IS NOT NULL AND ville != '' ORDER BY ville")]
+    return {"sources": sources, "villes": villes}
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +303,7 @@ def _analyse_depuis_row(row: sqlite3.Row) -> dict:
 
 
 def _annonce_depuis_row(row: sqlite3.Row) -> dict:
+    cles = row.keys()
     annonce = {
         "id": row["id"],
         "source": row["source"],
@@ -208,7 +314,11 @@ def _annonce_depuis_row(row: sqlite3.Row) -> dict:
         "pieces": row["pieces"],
         "url": row["url"],
         "score": row["score"],
+        "cree_le": row["cree_le"],
         "photos": _charger_json(row["photos"], []),
+        "favori": bool(row["favori"]) if "favori" in cles else False,
+        "masquee": bool(row["masquee"]) if "masquee" in cles else False,
+        "notes": row["notes"] if "notes" in cles else None,
         "analyse_photo": None,
     }
     if row["photo_analyse_le"] is not None:

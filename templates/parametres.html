@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block titre %}Paramètres{% endblock %}
+{% block contenu %}
+<h1>Paramètres</h1>
+<p class="sous">Enregistrés dans <code>settings.json</code> et appliqués immédiatement aux prochains traitements.
+{% if not cli_ok %}<br><strong style="color:var(--alerte)">La commande <code>claude</code> est introuvable sur ce PC</strong> : le moteur « claude_code » ne fonctionnera pas tant que Claude Code n'est pas installé et connecté.{% endif %}</p>
+
+<form method="post">
+{% for section, champs in sections %}
+  <fieldset>
+    <legend>{{ section }}</legend>
+    <div class="champs">
+    {% for nom, type_, libelle, aide in champs %}
+      <div class="champ">
+        <label for="{{ nom }}">{{ libelle }}</label>
+        {% if type_ == 'int' %}
+          <input type="number" step="1" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}" required>
+        {% elif type_ == 'float' %}
+          <input type="number" step="0.01" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}" required {{ 'data-poids' if nom.startswith('POIDS_') }}>
+        {% elif type_ == 'str' or type_ == 'liste' %}
+          <input type="text" id="{{ nom }}" name="{{ nom }}" value="{{ valeurs[nom] }}">
+        {% elif type_ == 'dict_int' %}
+          <textarea id="{{ nom }}" name="{{ nom }}">{{ valeurs[nom] }}</textarea>
+        {% elif type_ == 'sources' %}
+          <div>{% for s in sources_disponibles %}
+            <label style="display:inline-flex;gap:4px;font-weight:400;margin-right:12px"><input type="checkbox" name="{{ nom }}" value="{{ s }}" {{ 'checked' if s in valeurs[nom] }}> {{ s }}</label>
+          {% endfor %}</div>
+        {% elif type_.startswith('choix:') %}
+          <select id="{{ nom }}" name="{{ nom }}">
+            {% for c in type_.split(':')[1].split('|') %}<option value="{{ c }}" {{ 'selected' if valeurs[nom] == c }}>{{ c }}</option>{% endfor %}
+          </select>
+        {% endif %}
+        {% if aide %}<div class="aide">{{ aide }}</div>{% endif %}
+      </div>
+    {% endfor %}
+    </div>
+    {% if section == 'Pondération' %}
+      <p class="somme-poids" id="somme-poids"></p>
+    {% endif %}
+  </fieldset>
+{% endfor %}
+  <button type="submit">Enregistrer</button>
+  <a class="btn sec" href="{{ url_for('lancer') }}">Aller à la page Lancer</a>
+</form>
+
+<script>
+  const poids = document.querySelectorAll("[data-poids]"), somme = document.getElementById("somme-poids");
+  function majSomme() {
+    let total = 0; poids.forEach(p => total += parseFloat(p.value) || 0);
+    somme.textContent = "Somme des poids : " + total.toFixed(2) + (Math.abs(total - 1) > 0.001 ? "  (doit faire 1,00)" : "  ✓");
+    somme.classList.toggle("ko", Math.abs(total - 1) > 0.001);
+  }
+  poids.forEach(p => p.addEventListener("input", majSomme)); majSomme();
+</script>
+{% endblock %}
