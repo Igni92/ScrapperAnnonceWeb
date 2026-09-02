@@ -26,6 +26,7 @@ def _reponse(code: int, texte: str = "<html></html>"):
 
 
 def test_get_html_reprend_apres_429():
+    base.reinitialiser_compteurs()
     session = MagicMock()
     session.get.side_effect = [_reponse(429), _reponse(200, "<p>ok</p>")]
     with patch.object(base.time, "sleep") as sleep:
@@ -35,11 +36,47 @@ def test_get_html_reprend_apres_429():
     assert any(call.args[0] == config.SCRAPER_ATTENTE_429 for call in sleep.call_args_list)
 
 
-def test_get_html_abandonne_apres_deux_echecs():
+def test_get_html_abandonne_le_site_apres_deux_429():
+    base.reinitialiser_compteurs()
     session = MagicMock()
-    session.get.side_effect = [_reponse(429), _reponse(429)]
-    with patch.object(base.time, "sleep"):
+    session.get.side_effect = [_reponse(429), _reponse(429), _reponse(200)]
+    with patch.object(base.time, "sleep"), patch.object(config, "SCRAPER_MAX_429_PAR_SITE", 2):
         assert base.get_html(session, "https://www.pap.fr/annonces/x-r1") is None
+        # Le site est laissé tranquille : plus aucune requête pour ce lancement.
+        assert base.get_html(session, "https://www.pap.fr/annonces/y-r2") is None
+    assert session.get.call_count == 2
+    base.reinitialiser_compteurs()
+    with patch.object(base.time, "sleep"):
+        assert base.get_html(session, "https://www.pap.fr/annonces/y-r2") is not None
+
+
+def test_quota_de_pages_par_site():
+    base.reinitialiser_compteurs()
+    session = MagicMock()
+    session.get.return_value = _reponse(200, "<p>ok</p>")
+    with patch.object(base.time, "sleep"), patch.object(config, "SCRAPER_MAX_PAGES_PAR_SITE", 2):
+        assert base.get_html(session, "https://www.pap.fr/a") is not None
+        assert base.get_html(session, "https://www.pap.fr/b") is not None
+        assert base.get_html(session, "https://www.pap.fr/c") is None          # quota atteint
+        assert base.get_html(session, "https://www.seloger.com/x") is not None  # autre site, compteur séparé
+    assert session.get.call_count == 3
+
+
+def test_pause_aleatoire_entre_base_et_double():
+    with patch.object(base.time, "sleep") as sleep:
+        for _ in range(20):
+            base.pause(4.0)
+    assert all(4.0 <= c.args[0] <= 8.0 for c in sleep.call_args_list)
+
+
+def test_retry_after():
+    r = _reponse(429)
+    r.headers = {"Retry-After": "120"}
+    assert base._retry_after(r) == 120.0
+    r.headers = {"Retry-After": "9999"}
+    assert base._retry_after(r) == 600.0
+    r.headers = {}
+    assert base._retry_after(r) is None
 
 
 def test_pap_ignore_les_blocs_promotionnels():

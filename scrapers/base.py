@@ -2,9 +2,11 @@
 
 import json
 import logging
+import random
 import re
+import threading
 import time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -26,22 +28,72 @@ def session_http() -> requests.Session:
     return s
 
 
+# Compteurs par site (hôte) pour un même lancement : pages vues, 429 consécutifs, site abandonné.
+_etat_sites: dict[str, dict] = {}
+_verrou = threading.Lock()
+
+
+def reinitialiser_compteurs() -> None:
+    """À appeler au début de chaque lancement."""
+    with _verrou:
+        _etat_sites.clear()
+
+
+def _hote(url: str) -> str:
+    return urlparse(url).netloc.lower().removeprefix("www.")
+
+
+def pause(base_s: float) -> None:
+    """Pause aléatoire entre base_s et 2 × base_s : un rythme irrégulier, comme une personne."""
+    time.sleep(random.uniform(base_s, base_s * 2))
+
+
+def site_autorise(url: str) -> bool:
+    """False si le site a été abandonné pour ce lancement (trop de 429) ou si le quota de pages est atteint."""
+    etat = _etat_sites.setdefault(_hote(url), {"pages": 0, "n429": 0, "abandonne": False})
+    if etat["abandonne"]:
+        return False
+    if etat["pages"] >= config.SCRAPER_MAX_PAGES_PAR_SITE:
+        if not etat.get("quota_signale"):
+            log.warning("%s : quota de %d pages atteint pour ce lancement, on s'arrête là.",
+                        _hote(url), config.SCRAPER_MAX_PAGES_PAR_SITE)
+            etat["quota_signale"] = True
+        return False
+    return True
+
+
 def _get(session: requests.Session, url: str, delai: float, **kwargs) -> requests.Response | None:
-    """GET avec pause, et un nouvel essai après un 429 (trop de requêtes) ou une erreur 5xx."""
+    """GET à rythme lent : pause aléatoire, respect de Retry-After, abandon du site après trop de 429."""
+    hote = _hote(url)
+    with _verrou:
+        if not site_autorise(url):
+            return None
+        etat = _etat_sites[hote]
+        etat["pages"] += 1
     for essai in (1, 2):
         try:
             r = session.get(url, timeout=config.SCRAPER_TIMEOUT, **kwargs)
             r.raise_for_status()
-            time.sleep(delai)
+            etat["n429"] = 0
+            pause(delai)
             return r
         except requests.HTTPError as exc:
             code = exc.response.status_code if exc.response is not None else None
-            if essai == 1 and code == 429:
-                log.warning("Trop de requêtes vers %s : pause de %.0fs", url.split("/")[2], config.SCRAPER_ATTENTE_429)
-                time.sleep(config.SCRAPER_ATTENTE_429)
-                continue
+            if code == 429:
+                etat["n429"] += 1
+                if etat["n429"] >= config.SCRAPER_MAX_429_PAR_SITE:
+                    etat["abandonne"] = True
+                    log.warning("%s : %d refus « trop de requêtes » : site laissé tranquille jusqu'au prochain "
+                                "lancement (attendez au moins une heure).", hote, etat["n429"])
+                    return None
+                attente = _retry_after(exc.response) or config.SCRAPER_ATTENTE_429
+                log.warning("%s : trop de requêtes, pause de %.0fs", hote, attente)
+                time.sleep(attente)
+                if essai == 1:
+                    continue
+                return None
             if essai == 1 and code and code >= 500:
-                time.sleep(delai * 2)
+                pause(delai * 2)
                 continue
             log.warning("Échec GET %s : %s", url, exc)
             return None
@@ -49,6 +101,15 @@ def _get(session: requests.Session, url: str, delai: float, **kwargs) -> request
             log.warning("Échec GET %s : %s", url, exc)
             return None
     return None
+
+
+def _retry_after(reponse) -> float | None:
+    """Délai demandé par le site (en-tête Retry-After, en secondes), borné à 10 minutes."""
+    try:
+        valeur = float((getattr(reponse, "headers", None) or {}).get("Retry-After", ""))
+        return min(max(valeur, 5.0), 600.0)
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def get_html(session: requests.Session, url: str, delai: float | None = None, **kwargs) -> BeautifulSoup | None:

@@ -73,6 +73,9 @@ def charger(url: str, attendre: str | None = None) -> str | None:
         log.error("Playwright n'est pas installé : exécutez  pip install playwright  puis  "
                   "python -m playwright install chromium  (voir README).")
         return None
+    from . import base
+    if not base.site_autorise(url):
+        return None
     try:
         ctx = _ouvrir()
         page = ctx.new_page()
@@ -97,7 +100,8 @@ def charger(url: str, attendre: str | None = None) -> str | None:
         if est_bloquee(html):
             log.warning("Page bloquée par la protection anti-robot : %s", url)
             return None
-        time.sleep(config.SCRAPER_DELAI)
+        from . import base
+        base.pause(config.SCRAPER_DELAI_DETAIL)      # rythme lent, irrégulier, comme une lecture humaine
         return html
     except Exception as exc:
         log.warning("Échec navigateur sur %s : %s", url, exc)

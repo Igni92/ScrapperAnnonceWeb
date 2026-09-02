@@ -122,9 +122,12 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 SCRAPER_TIMEOUT = 20
-SCRAPER_DELAI = 1.5          # pause entre deux requêtes vers un même site (pages de résultats)
-SCRAPER_DELAI_DETAIL = 3.0   # pause entre deux pages d'annonce (photos), plus sensibles au blocage
-SCRAPER_ATTENTE_429 = 20.0   # attente avant nouvel essai après un « 429 Too Many Requests »
+# Rythme « humain » : chaque pause est tirée au hasard entre la valeur et le double de la valeur.
+SCRAPER_DELAI = 4.0            # pause de base entre deux pages de résultats d'un même site (s)
+SCRAPER_DELAI_DETAIL = 8.0     # pause de base entre deux pages d'annonce (photos)
+SCRAPER_ATTENTE_429 = 60.0     # attente après un « 429 Too Many Requests » (ou Retry-After du site)
+SCRAPER_MAX_PAGES_PAR_SITE = 60    # pages (résultats + annonces) max par site et par lancement
+SCRAPER_MAX_429_PAR_SITE = 2       # au-delà, le site est laissé tranquille jusqu'au prochain lancement
 
 # Alertes e-mail (source "alertes") : l'application lit les e-mails d'alerte envoyés par
 # Leboncoin / SeLoger dans votre boîte, via IMAP. Avec Gmail : activez IMAP et créez un
@@ -163,6 +166,9 @@ PARAMETRES = [
     ("PRIX_MAX", "int", "Recherche", "Loyer maximum (€)", "Les annonces plus chères sont écartées."),
     ("SURFACE_MIN", "int", "Recherche", "Surface minimale (m²)", "Les annonces plus petites sont écartées."),
     ("PIECES_MIN", "int", "Recherche", "Nombre de pièces minimum", ""),
+    ("SCRAPER_DELAI", "float", "Recherche", "Pause entre deux pages (s)", "Tirée au hasard entre cette valeur et son double."),
+    ("SCRAPER_DELAI_DETAIL", "float", "Recherche", "Pause entre deux pages d'annonce (s)", ""),
+    ("SCRAPER_MAX_PAGES_PAR_SITE", "int", "Recherche", "Pages max par site et par lancement", "Limite la charge envoyée à chaque site."),
     ("PRIX_MIN_REF", "int", "Notation", "Loyer « idéal » (€)", "En dessous, le sous-score prix vaut 100."),
     ("SURFACE_MAX_REF", "int", "Notation", "Surface « idéale » (m²)", "Au-dessus, le sous-score surface vaut 100."),
     ("DESTINATIONS", "destinations", "Trajets", "Destinations",

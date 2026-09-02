@@ -43,6 +43,7 @@ def scraper_tout(sources: list[str]) -> list[dict]:
         "pieces_min": config.PIECES_MIN,
     }
     annonces: list[dict] = []
+    scrapers_base.reinitialiser_compteurs()
     for nom in sources:
         if nom not in SCRAPERS:
             log.warning("Source inconnue ignorée : %s", nom)
