@@ -10,7 +10,8 @@ def test_trajet_reel_prime_sur_la_table():
 
 
 def test_minutes_trajet_secours():
-    assert scoring.minutes_trajet("Paris") == config.TRAJET_MINUTES["Paris"]
+    ville = next(iter(config.TRAJET_MINUTES))
+    assert scoring.minutes_trajet(ville) == config.TRAJET_MINUTES[ville]
     assert scoring.minutes_trajet("Inconnue") == config.TRAJET_DEFAUT
     assert scoring.minutes_trajet("Paris", 12) == 12
 

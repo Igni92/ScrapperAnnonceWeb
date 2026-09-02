@@ -55,9 +55,46 @@ def scraper_tout(sources: list[str]) -> list[dict]:
     return annonces
 
 
-def filtrer(annonces: list[dict]) -> list[dict]:
+def _normaliser_ville(texte: str) -> str:
+    import unicodedata
+    t = unicodedata.normalize("NFKD", texte or "").encode("ascii", "ignore").decode().lower()
+    t = t.replace("-", " ").replace("'", " ").replace("saint ", "st ")
+    return " ".join(t.split())
+
+
+def ville_annonce(annonce: dict) -> str:
+    """Ville de l'annonce, avec l'arrondissement déduit du code postal (75013 -> « Paris 13e »)."""
+    ville = (annonce.get("ville") or "").strip()
+    cp = str(annonce.get("code_postal") or "")
+    for prefixe, nom in (("75", "Paris"), ("69", "Lyon"), ("13", "Marseille")):
+        if cp.startswith(prefixe) and len(cp) == 5 and cp[2] in "01" and _normaliser_ville(ville) == nom.lower():
+            n = int(cp[3:])
+            if 1 <= n <= 20:
+                return f"{nom} {n}{'er' if n == 1 else 'e'}"
+    return ville
+
+
+def ville_autorisee(annonce: dict, villes: list[str]) -> bool:
+    """True si la ville de l'annonce est dans la liste (« Paris » autorise tous les arrondissements)."""
+    ville = _normaliser_ville(ville_annonce(annonce))
+    if not ville:
+        return True                    # ville inconnue : on ne peut pas trancher, on garde
+    autorisees = {_normaliser_ville(v) for v in villes}
+    if ville in autorisees:
+        return True
+    # « Paris » dans la liste couvre « Paris 13e » ; l'inverse est faux.
+    base = ville.split(" ")[0]
+    return base in autorisees and ville[len(base):].strip()[:1].isdigit()
+
+
+def filtrer(annonces: list[dict], villes: list[str] | None = None) -> list[dict]:
+    if villes is None:
+        villes = communes.villes_pour_scraping()
     gardees = []
     for a in annonces:
+        if config.FILTRER_VILLES and not ville_autorisee(a, villes):
+            log.debug("Écartée (ville %s hors liste) : %s", a.get("ville"), a.get("titre") or a["url"])
+            continue
         if a.get("prix") is not None and a["prix"] > config.PRIX_MAX:
             continue
         if a.get("surface") is not None and a["surface"] < config.SURFACE_MIN:
@@ -184,10 +221,13 @@ def executer(mode: str, sources: list[str] | None = None, max_photos: int | None
         sources = sources or list(config.SOURCES_ACTIVES)
         brutes = scraper_tout(sources)
         candidates = dedupliquer(filtrer(brutes))
+        hors_ville = sum(1 for a in brutes if config.FILTRER_VILLES
+                         and not ville_autorisee(a, communes.villes_pour_scraping()))
         connues = db.urls_connues(conn, (a["url"] for a in candidates))
         nouvelles = [a for a in candidates if a["url"] not in connues]
-        log.info("%d annonce(s) après filtrage (%d brutes), %d nouvelle(s), %d déjà en base",
-                 len(candidates), len(brutes), len(nouvelles), len(connues))
+        log.info("%d annonce(s) après filtrage (%d brutes, dont %d hors des villes recherchées), "
+                 "%d nouvelle(s), %d déjà en base",
+                 len(candidates), len(brutes), hors_ville, len(nouvelles), len(connues))
         # Trajets uniquement pour les nouvelles annonces (les autres sont déjà en base, avec cache).
         nouvelles = calculer_trajets(conn, nouvelles)
         resume.update(brutes=len(brutes), filtrees=len(candidates), nouvelles=len(nouvelles))

@@ -12,7 +12,10 @@ SETTINGS_PATH = Path(__file__).with_name("settings.json")
 # ---------------------------------------------------------------------------
 # Critères de recherche / filtrage
 # ---------------------------------------------------------------------------
-VILLES = ["Paris", "Montreuil", "Vincennes", "Saint-Mandé"]
+VILLES = ["Rungis", "Chevilly-Larue", "L'Haÿ-les-Roses", "Thiais", "Fresnes", "Villejuif", "Orly"]
+# Écarter les annonces dont la ville n'est pas dans VILLES (ni dans les communes suggérées) :
+# les sites renvoient souvent des annonces des villes voisines.
+FILTRER_VILLES = True
 SOURCES_ACTIVES = ["pap", "leboncoin", "seloger"]
 # Carte interactive : départements dont les communes sont affichées et évaluées.
 CARTE_DEPARTEMENTS = ["75", "92", "93", "94"]
@@ -54,10 +57,10 @@ TRAJET_DELAI = 1.0               # pause entre deux appels réseau (politique OS
 # Secours si aucune destination n'est configurée ou si le calcul échoue :
 # temps de trajet estimé (minutes) par ville. Ville absente => TRAJET_DEFAUT.
 TRAJET_MINUTES = {
-    "Paris": 20,
-    "Montreuil": 30,
-    "Vincennes": 25,
-    "Saint-Mandé": 25,
+    "Rungis": 5,
+    "Chevilly-Larue": 15,
+    "L'Haÿ-les-Roses": 20,
+    "Villejuif": 25,
 }
 TRAJET_DEFAUT = 45
 
@@ -130,6 +133,8 @@ PARAMETRES = [
      "Codes séparés par des virgules (75, 92, 93, 94, 91, 77, 78, 95)."),
     ("SUGGESTIONS_AUTO", "bool", "Recherche", "Inclure automatiquement les communes suggérées",
      "Au scraping, ajoute les communes de la carte qui respectent les temps de trajet."),
+    ("FILTRER_VILLES", "bool", "Recherche", "Écarter les annonces hors des villes recherchées",
+     "Les sites renvoient souvent des annonces des villes voisines (ex. Paris pour Vincennes)."),
     ("SOURCES_ACTIVES", "sources", "Recherche", "Sites à scraper", ""),
     ("PRIX_MAX", "int", "Recherche", "Loyer maximum (€)", "Les annonces plus chères sont écartées."),
     ("SURFACE_MIN", "int", "Recherche", "Surface minimale (m²)", "Les annonces plus petites sont écartées."),

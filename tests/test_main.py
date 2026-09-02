@@ -40,6 +40,7 @@ def _lancer(args, client, tmp_path):
     with patch.object(config, "DB_PATH", str(tmp_path / "t.db")), \
          patch.object(config, "PHOTO_BACKEND", "api"), \
          patch.object(config, "DESTINATIONS", []), \
+         patch.object(config, "VILLES", ["Paris"]), \
          patch.dict(main.SCRAPERS, {"pap": _faux_scraper}, clear=True), \
          patch.object(pa, "get_client", return_value=client), \
          patch.object(pa, "telecharger_photo", return_value=("image/jpeg", b"AAAA")), \
@@ -96,6 +97,7 @@ def test_pipeline_ecarte_les_trajets_trop_longs(tmp_path):
         return annonce["trajets"]
 
     with patch.object(config, "DB_PATH", str(tmp_path / "t.db")), \
+         patch.object(config, "VILLES", ["Paris"]), \
          patch.object(config, "DESTINATIONS", [{"nom": "Rungis", "adresse": "Rungis", "mode": "transport", "max_minutes": 30}]), \
          patch.dict(main.SCRAPERS, {"pap": _faux_scraper}, clear=True), \
          patch.object(trajets, "calculer_trajets", side_effect=faux_calcul):
@@ -105,3 +107,24 @@ def test_pipeline_ecarte_les_trajets_trop_longs(tmp_path):
     assert "https://ex.com/moisi" not in urls and "https://ex.com/propre" in urls
     propre = next(a for a in db.lister_annonces(conn) if a["url"].endswith("propre"))
     assert propre["trajet_minutes"] == 20 and propre["trajets"]["Rungis"]["minutes"] == 20
+
+
+def test_filtre_villes():
+    villes = ["Vincennes", "Paris 13e", "L'Haÿ-les-Roses"]
+    assert main.ville_autorisee({"ville": "Vincennes"}, villes)
+    assert main.ville_autorisee({"ville": "vincennes", "code_postal": "94300"}, villes)
+    assert main.ville_autorisee({"ville": "L'Hay-les-Roses"}, villes)           # accents ignorés
+    assert main.ville_autorisee({"ville": "Paris", "code_postal": "75013"}, villes)   # arrondissement déduit
+    assert not main.ville_autorisee({"ville": "Paris", "code_postal": "75015"}, villes)
+    assert not main.ville_autorisee({"ville": "Paris"}, villes)                 # arrondissement inconnu
+    assert not main.ville_autorisee({"ville": "Montreuil"}, villes)
+    assert main.ville_autorisee({"ville": ""}, villes)                          # ville inconnue : gardée
+    assert main.ville_autorisee({"ville": "Paris 15e"}, ["Paris"])             # « Paris » couvre tout
+    assert main.ville_annonce({"ville": "Paris", "code_postal": "75001"}) == "Paris 1er"
+
+    brutes = [{"ville": "Paris", "code_postal": "75015", "prix": 1000.0, "surface": 40.0, "pieces": 2, "url": "u1"},
+              {"ville": "Vincennes", "prix": 1000.0, "surface": 40.0, "pieces": 2, "url": "u2"}]
+    with patch.object(config, "FILTRER_VILLES", True):
+        assert [a["url"] for a in main.filtrer(brutes, villes)] == ["u2"]
+    with patch.object(config, "FILTRER_VILLES", False):
+        assert len(main.filtrer(brutes, villes)) == 2
